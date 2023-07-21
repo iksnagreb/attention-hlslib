@@ -155,7 +155,7 @@ void test_col2row_stream_tiler() {
     using Chunk = decltype(group_stream.out.read());
     // Tile the group stream such that there are C tiles per row
     Col2RowStreamTiler<R, C, N / C, Chunk> tiler(
-        // Transpose each tile to adapt from row-major to col-major as well
+        // Transpose each tile to adapt from col-major to row-major as well
         group_stream.out, Transpose<M / R>{}
     );
 
