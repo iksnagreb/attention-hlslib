@@ -13,7 +13,13 @@ include_directories($ENV{FINN_HLSLIB})
 # Local attention library
 include_directories(.)
 
+# Use CTest for testing
+include(CTest)
+
 # Tests the flatten operation
 add_executable(test_flatten tests/test_flatten.cpp flatten.hpp)
+add_test(NAME test_flatten COMMAND test_flatten)
+
 # Tests the swizzle operation
 add_executable(test_swizzle tests/test_swizzle.cpp swizzle.hpp)
+add_test(NAME test_swizzle COMMAND test_swizzle)

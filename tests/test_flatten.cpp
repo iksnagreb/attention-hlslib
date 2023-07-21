@@ -16,7 +16,7 @@ void test_flatten() {
     // bit-vector
     assert(flatten<9>(array) == 0x987654321);
     // The width of the flat bit-vector must be N x the bit-width per element
-    assert(decltype(flatten<9>(array))::width == 3);
+    assert(decltype(flatten<9>(array))::width == 36);
 }
 
 // Program entrypoint
