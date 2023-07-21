@@ -23,3 +23,12 @@ add_test(NAME test_flatten COMMAND test_flatten)
 # Tests the swizzle operation
 add_executable(test_swizzle tests/test_swizzle.cpp swizzle.hpp)
 add_test(NAME test_swizzle COMMAND test_swizzle)
+
+# Tests the StreamTiler
+add_executable(test_stream_tiler
+        tests/test_stream_tiler.cpp
+        stream_tiler.hpp
+        flatten.hpp
+        tests/matrix.hpp
+        )
+add_test(NAME test_stream_tiler COMMAND test_stream_tiler)

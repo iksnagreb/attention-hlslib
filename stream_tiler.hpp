@@ -30,19 +30,19 @@ template<unsigned SF, unsigned NF, unsigned N = 1>
             // Row-Major order means the neuron fold runs fastest
             ++nf;
             // If it wraps around, one row is done
-            if (nf == NF) {
+            if(nf == NF) {
                 // Reset to the next row
                 nf = 0;
                 // Count the next chunk before advancing to a full synapse fold
                 ++n;
                 // If this wraps around, a complete row of tiles is done
-                if (n == N) {
+                if(n == N) {
                     // Reset to the first row of the next tile
                     n = 0;
                     // Advance to the next synapse fold
                     ++sf;
                     // If this wraps around, all tiles are done
-                    if (sf == SF) {
+                    if(sf == SF) {
                         // Reset to the start
                         sf = 0;
                     }
@@ -70,19 +70,19 @@ template<unsigned SF, unsigned NF, unsigned N = 1>
             // Col-Major order means the synapse fold runs fastest
             ++sf;
             // If it wraps around, one column is done
-            if (sf == SF) {
+            if(sf == SF) {
                 // Reset to the next column
                 sf = 0;
                 // Count the next chunk before advancing to a full neuron fold
                 ++n;
                 // If this wraps around, a complete column of tiles is done
-                if (n == N) {
+                if(n == N) {
                     // Reset to the first column of the next tile
                     n = 0;
                     // Advance to the next neuron fold
                     ++nf;
                     // If this wraps around, all tiles are done
-                    if (nf == NF) {
+                    if(nf == NF) {
                         // Reset to the start
                         nf = 0;
                     }
@@ -139,7 +139,7 @@ template<
             // Iterate tile indices according to the specified output order
             OOrder<SF, NF, 1> o_index;
             // Repeatedly iterate over all tiles
-            for (unsigned i = 0; i < rep * SF * NF; ++i) {
+            for(unsigned i = 0; i < rep * SF * NF; ++i) {
                 // Send the next tile into the output stream
                 out.write(buffer[o_index.sf][o_index.nf]);
                 // Next tile index
@@ -165,7 +165,7 @@ template<
                 // Iterate tile indices according to the specified output order
                 OOrder<SF, NF, 1> o_index;
                 // Repeatedly iterate over all tiles
-                for (unsigned i = 0; i < rep * SF * NF; ++i) {
+                for(unsigned i = 0; i < rep * SF * NF; ++i) {
                     // Send the next tile into the output stream
                     //  Note: swizzle transposes each tile
                     out.write(swizzle<S, N>(buffer[o_index.sf][o_index.nf]));
@@ -187,7 +187,7 @@ template<
             IOrder<SF, NF, N> i_index;
             // It takes N cycles to see all chunks of a tile and there are in
             // total SF x NF tiles to complete the matrix
-            for (unsigned i = 0; i < N * SF * NF; ++i) {
+            for(unsigned i = 0; i < N * SF * NF; ++i) {
                 // Current chunk index within a tile
                 unsigned n = i_index.n;
                 // Reference to the tile to be filled next

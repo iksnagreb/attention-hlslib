@@ -12,14 +12,18 @@
 template<class Type, std::size_t M, std::size_t N>
     using Matrix = std::array<std::array<Type, N>, M>;
 
+// Tiled matrix of R x C tiles each of M x N elements of type
+template<class Type, std::size_t R, std::size_t C, std::size_t M, std::size_t N>
+    using TiledMatrix = Matrix<Matrix<Type, M, N>, R, C>;
+
 // Creates a randomly filled matrix of shape M x N of Type
 template<class Type, std::size_t M, std::size_t N>
     Matrix<Type, M, N> rand_matrix() {
         // Allocate the matrix on the stack
         Matrix<Type, M, N> matrix;
         // Iterate the indices in row-major order
-        for (unsigned i = 0; i < M; ++i) {
-            for (unsigned j = 0; j < N; ++j) {
+        for(unsigned i = 0; i < M; ++i) {
+            for(unsigned j = 0; j < N; ++j) {
                 // Generate random number in range 0 to 2 ^ Type::width
                 matrix[i][j] = std::rand() % (2 << Type::width);
             }
@@ -28,13 +32,90 @@ template<class Type, std::size_t M, std::size_t N>
         return matrix;
     }
 
+// Tiles a matrix into R rows and C columns
+template<std::size_t R, std::size_t C, class Type, std::size_t M, std::size_t N>
+    auto tile_matrix(const Matrix<Type, M, N> &matrix) {
+        // Allocate the tiled matrix on the stack
+        TiledMatrix<Type, R, C, M / R, N / C> tiled;
+        // Iterate the tile indices in row-major order
+        for(unsigned i = 0; i < R; ++i) {
+            for(unsigned j = 0; j < C; ++j) {
+                // Iterate each tile in row-major order
+                for(unsigned k = 0; k < M / R; ++k) {
+                    for(unsigned l = 0; l < N / C; ++l) {
+                        // Fill element of the tiled matrix
+                        tiled[i][j][k][l] =
+                            matrix[i * (M / R) + k][j * (N / C) + l];
+                    }
+                }
+            }
+        }
+        // Return the tiled matrix from the stack by copy
+        return tiled;
+    }
+
+// Tag indicating transposed tiling
+struct TransposeTile {
+};
+
+// Tiles a matrix into R rows and C columns; Tiles in col-major order
+template<std::size_t R, std::size_t C, class Type, std::size_t M, std::size_t N>
+    auto tile_matrix(const Matrix<Type, M, N> &matrix, TransposeTile) {
+        // Allocate the tiled matrix on the stack
+        //  Note: Transposed tile order (last two dimensions)
+        TiledMatrix<Type, R, C, N / C, M / R> tiled;
+        // Iterate the tile indices in row-major order
+        for(unsigned i = 0; i < R; ++i) {
+            for(unsigned j = 0; j < C; ++j) {
+                // Iterate each tile in col-major order
+                for(unsigned l = 0; l < N / C; ++l) {
+                    for(unsigned k = 0; k < M / R; ++k) {
+                        // Fill element of the tiled matrix
+                        tiled[i][j][l][k] =
+                            matrix[i * (M / R) + k][j * (N / C) + l];
+                    }
+                }
+            }
+        }
+        // Return the tiled matrix from the stack by copy
+        return tiled;
+    }
+
+// Flattening of buffers to bit vectors
+#include "flatten.hpp"
+
+// Flattens a tiled matrix by converting each tile to a flat bitvector
+template<std::size_t R, std::size_t C, class Type, std::size_t M, std::size_t N>
+    auto flatten_tiles(const TiledMatrix<Type, R, C, M, N> &tiles) {
+        // Allocate the tiled matrix on the stack
+        Matrix<ap_uint<Type::width * M * N>, R, C> flattened;
+        // Iterate the tile indices in row-major order
+        for(unsigned i = 0; i < R; ++i) {
+            for(unsigned j = 0; j < C; ++j) {
+                // Create a flat buffer of elements from each tile
+                Type buffer[M * N];
+                // Iterate each tile in row-major order
+                for(unsigned k = 0; k < M; ++k) {
+                    for(unsigned l = 0; l < N; ++l) {
+                        // Collect tile elements
+                        buffer[k * N + l] = tiles[i][j][k][l];
+                    }
+                }
+                // Flatten the buffer into a bitvector
+                flattened[i][j] = flatten<N * M>(buffer);
+            }
+        }
+        // Return the flattened tiled matrix from the stack by copy
+        return flattened;
+    }
+
 // Format and print a matrix to stdout
 template<class Type, std::size_t M, std::size_t N>
     void print_matrix(
         const Matrix<Type, M, N> &matrix, const char *f = "%8x ") {
         // Iterate the indices in row-major order
-        for (unsigned i = 0; i < M; ++i) {
-            for (unsigned j = 0; j < N; ++j) {
+        for(unsigned i = 0; i < M; ++i) {
+            for(unsigned j = 0; j < N; ++j) {
                 // Formatted print of the matrix element
                 std::printf(f, matrix[i][j]);
             }
@@ -49,8 +130,8 @@ template<class Lhs, class Rhs, std::size_t M, std::size_t N, std::size_t L>
         // Allocate the result matrix on the stack
         Matrix<decltype(Lhs{} * Rhs{}), M, L> result;
         // Iterate the indices in row-major order
-        for (unsigned i = 0; i < M; ++i) {
-            for (unsigned j = 0; j < L; ++j) {
+        for(unsigned i = 0; i < M; ++i) {
+            for(unsigned j = 0; j < L; ++j) {
                 // Clear the accumulator
                 result[i][j] = 0;
                 // Iterate the common dimension, i.e. accumulate the dot-product
@@ -70,8 +151,8 @@ template<class Type, std::size_t M, std::size_t N>
     bool all_equal(
         const Matrix<Type, M, N> &lhs, const Matrix<Type, M, N> &rhs) {
         // Iterate the indices in row-major order
-        for (unsigned i = 0; i < M; ++i) {
-            for (unsigned j = 0; j < N; ++j) {
+        for(unsigned i = 0; i < M; ++i) {
+            for(unsigned j = 0; j < N; ++j) {
                 // If any pair of elements is not equal, the matrices differ
                 if(lhs[i][j] != rhs[i][j]) {
                     return false;
@@ -119,8 +200,8 @@ template<class Type>
         template<std::size_t M, std::size_t N>
             explicit RowMajorMatrixStreamer(const Matrix<Type, M, N> &in) {
                 // Iterate the indices in row-major order
-                for (unsigned i = 0; i < M; ++i) {
-                    for (unsigned j = 0; j < N; ++j) {
+                for(unsigned i = 0; i < M; ++i) {
+                    for(unsigned j = 0; j < N; ++j) {
                         // Insert element into the stream
                         out.write(in[i][j]);
                     }
@@ -131,8 +212,8 @@ template<class Type>
         template<std::size_t M, std::size_t N>
             static void read(hls::stream<Type> &in, Matrix<Type, M, N> &out) {
                 // Iterate the indices in row-major order
-                for (unsigned i = 0; i < M; ++i) {
-                    for (unsigned j = 0; j < N; ++j) {
+                for(unsigned i = 0; i < M; ++i) {
+                    for(unsigned j = 0; j < N; ++j) {
                         // Extract element from the stream
                         out[i][j] = in.read();
                     }
@@ -150,8 +231,8 @@ template<class Type>
         template<std::size_t M, std::size_t N>
             explicit ColMajorMatrixStreamer(const Matrix<Type, M, N> &in) {
                 // Iterate the indices in column-major order
-                for (unsigned j = 0; j < N; ++j) {
-                    for (unsigned i = 0; i < M; ++i) {
+                for(unsigned j = 0; j < N; ++j) {
+                    for(unsigned i = 0; i < M; ++i) {
                         // Insert element into the stream
                         out.write(in[i][j]);
                     }
@@ -162,8 +243,8 @@ template<class Type>
         template<std::size_t M, std::size_t N>
             static void read(hls::stream<Type> &in, Matrix<Type, M, N> &out) {
                 // Iterate the indices in column-major order
-                for (unsigned j = 0; j < N; ++j) {
-                    for (unsigned i = 0; i < M; ++i) {
+                for(unsigned j = 0; j < N; ++j) {
+                    for(unsigned i = 0; i < M; ++i) {
                         // Extract element from the stream
                         out[i][j] = in.read();
                     }
@@ -175,8 +256,6 @@ template<class Type>
 #include <ap_int.h>
 // Slicing of bit-vectors
 #include <interpret.hpp>
-// Flattening of buffers to bit vectors
-#include "flatten.hpp"
 
 // Adapts a stream by grouping N sequential elements
 template<class Type, std::size_t N>
@@ -191,7 +270,7 @@ template<class Type, std::size_t N>
             // Operate as long as there are elements in the input stream
             while(!in.empty()) {
                 // Collect the next N elements into the buffer
-                for (std::size_t i = 0; i < N; ++i) {
+                for(std::size_t i = 0; i < N; ++i) {
                     // The stream must not be empty before completing a group
                     //  I.e., the length of the stream must be a multiple of N
                     assert(!in.empty());
