@@ -175,10 +175,6 @@ int main(int, char**) {
     test_col2col_stream_tiler();
     test_col2row_stream_tiler();
 
-    for(int i = 0; i < 10; ++i) {
-
-    }
-
     // No error, exit with status code "ok"
     return EXIT_SUCCESS;
 }
