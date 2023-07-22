@@ -6,7 +6,7 @@
 #include <ap_int.h>
 
 // Matrix and matrix streaming utility
-#include "matrix.hpp"
+#include "utils.hpp"
 // StreamTiler to be tested
 #include "stream_tiler.hpp"
 

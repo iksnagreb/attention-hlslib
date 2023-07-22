@@ -1,5 +1,5 @@
-#ifndef ATTENTION_HLSLIB_MATRIX_HPP
-#define ATTENTION_HLSLIB_MATRIX_HPP
+#ifndef ATTENTION_HLSLIB_UTILS_HPP
+#define ATTENTION_HLSLIB_UTILS_HPP
 
 // Use nested std::array to represent a matrix
 #include <array>
@@ -308,4 +308,4 @@ template<class Type, std::size_t N>
         }
     };
 
-#endif //ATTENTION_HLSLIB_MATRIX_HPP
+#endif //ATTENTION_HLSLIB_UTILS_HPP
