@@ -10,7 +10,8 @@ add_executable(run_tests
         tests_main.cpp
         test_flatten.cpp
         test_swizzle.cpp
-        test_stream_tiler.cpp)
+        test_stream_tiler.cpp
+        test_matmul.cpp)
 # Dynamically link the boost libraries to the test executable
 target_link_libraries(run_tests ${Boost_LIBRARIES})
 

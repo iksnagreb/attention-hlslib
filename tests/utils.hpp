@@ -124,11 +124,14 @@ template<class Type, std::size_t M, std::size_t N>
         }
     }
 
+// Utility to get the accumulator type necessary to fit a MAC operation
+#include "mac_info.hpp"
+
 // Multiplies two matrices
 template<class Lhs, class Rhs, std::size_t M, std::size_t N, std::size_t L>
     auto matmul(const Matrix<Lhs, M, N> &lhs, const Matrix<Rhs, N, L> &rhs) {
         // Allocate the result matrix on the stack
-        Matrix<decltype(Lhs{} * Rhs{}), M, L> result;
+        Matrix<typename MACInfo<N, Lhs, Rhs>::AccType, M, L> result;
         // Iterate the indices in row-major order
         for(unsigned i = 0; i < M; ++i) {
             for(unsigned j = 0; j < L; ++j) {
@@ -198,12 +201,16 @@ template<class Type>
 
         // Takes a matrix (block of memory) and inserts it into the stream
         template<std::size_t M, std::size_t N>
-            explicit RowMajorMatrixStreamer(const Matrix<Type, M, N> &in) {
-                // Iterate the indices in row-major order
-                for(unsigned i = 0; i < M; ++i) {
-                    for(unsigned j = 0; j < N; ++j) {
-                        // Insert element into the stream
-                        out.write(in[i][j]);
+            explicit RowMajorMatrixStreamer(
+                const Matrix<Type, M, N> &in, const unsigned rep = 1) {
+                // Repeat the matrix stream
+                for(unsigned n = 0; n < rep; ++n) {
+                    // Iterate the indices in row-major order
+                    for(unsigned i = 0; i < M; ++i) {
+                        for(unsigned j = 0; j < N; ++j) {
+                            // Insert element into the stream
+                            out.write(in[i][j]);
+                        }
                     }
                 }
             }
@@ -229,12 +236,16 @@ template<class Type>
 
         // Takes a matrix (block of memory) and inserts it into the stream
         template<std::size_t M, std::size_t N>
-            explicit ColMajorMatrixStreamer(const Matrix<Type, M, N> &in) {
-                // Iterate the indices in column-major order
-                for(unsigned j = 0; j < N; ++j) {
-                    for(unsigned i = 0; i < M; ++i) {
-                        // Insert element into the stream
-                        out.write(in[i][j]);
+            explicit ColMajorMatrixStreamer(
+                const Matrix<Type, M, N> &in, const unsigned rep = 1) {
+                // Repeat the matrix stream
+                for(unsigned n = 0; n < rep; ++n) {
+                    // Iterate the indices in column-major order
+                    for(unsigned j = 0; j < N; ++j) {
+                        for(unsigned i = 0; i < M; ++i) {
+                            // Insert element into the stream
+                            out.write(in[i][j]);
+                        }
                     }
                 }
             }
