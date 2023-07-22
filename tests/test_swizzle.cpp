@@ -1,6 +1,7 @@
-// EXIT_SUCCESS macro and assert
-#include <cstdlib>
-#include <cassert>
+// Setup Boost Tests
+#define BOOST_TEST_DYN_LINK
+#include <boost/test/unit_test.hpp>
+
 // Arbitrary precision integers, i.e. bit-vectors
 #include <ap_int.h>
 
@@ -8,26 +9,18 @@
 #include "swizzle.hpp"
 
 // Runs the test of the swizzle operation
-void test_swizzle() {
+BOOST_AUTO_TEST_CASE(test_swizzle) {
     // Test vector of 4 groups of 3 elements each
     //  Note: 4 bit per element to easily specify in hexadecimal
     ap_uint<48> test_vector = 0x321321321321;
     // Swizzle of the test vector should result in 3 groups of 4 element each
-    assert(
+    BOOST_CHECK(
         (swizzle</*per group*/3, /*groups*/4>(test_vector)) == 0x333322221111
     );
     // The inverse of swizzle is swizzle with flipped arguments
-    assert(
+    BOOST_CHECK(
         (swizzle<4, 3>(swizzle<3, 4>(test_vector))) == test_vector
     );
     // Swizzles preserves the width of the bit-vector
-    assert(decltype(swizzle<3, 4>(test_vector))::width == 48);
-}
-
-// Program entrypoint
-int main(int, char**) {
-    // Run the test (might fail via assertion)
-    test_swizzle();
-    // No error, exit with status code "ok"
-    return EXIT_SUCCESS;
+    BOOST_CHECK(decltype(swizzle<3, 4>(test_vector))::width == 48);
 }

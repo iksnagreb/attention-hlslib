@@ -1,6 +1,6 @@
-// EXIT_SUCCESS macro and assert
-#include <cstdlib>
-#include <cassert>
+// Setup Boost Tests
+#define BOOST_TEST_DYN_LINK
+#include <boost/test/unit_test.hpp>
 
 // Arbitrary precision integers, i.e. bit-vectors
 #include <ap_int.h>
@@ -20,7 +20,7 @@ static constexpr std::size_t R =  4;  // Tile rows
 static constexpr std::size_t C =  3;  // Tile cols
 
 // Tests row-major to col-major adapter
-void test_row2col_adapter() {
+BOOST_AUTO_TEST_CASE(test_row2col_adapter) {
     // Generate a random matrix
     auto matrix = rand_matrix<TestType, M, N>();
 
@@ -33,11 +33,11 @@ void test_row2col_adapter() {
 
     // Adapting the row-major stream to col-major order should be identical to
     // directly streaming in col-major order
-    assert(all_equal(adapted_stream.out, col_stream.out));
+    BOOST_CHECK(all_equal(adapted_stream.out, col_stream.out));
 }
 
 // Tests col-major to row-major adapter
-void test_col2row_adapter() {
+BOOST_AUTO_TEST_CASE(test_col2row_adapter) {
     // Generate a random matrix
     auto matrix = rand_matrix<TestType, M, N>();
 
@@ -50,12 +50,12 @@ void test_col2row_adapter() {
 
     // Adapting the col-major stream to row-major order should be identical to
     // directly streaming in row-major order
-    assert(all_equal(adapted_stream.out, row_stream.out));
+    BOOST_CHECK(all_equal(adapted_stream.out, row_stream.out));
 }
 
 // Tests tiling a row-major order matrix stream into a row-major oder stream of
 // tiles
-void test_row2row_stream_tiler() {
+BOOST_AUTO_TEST_CASE(test_row2row_stream_tiler) {
     // Generate a random matrix
     auto matrix = rand_matrix<TestType, M, N>();
     // Tile and flatten the matrix
@@ -76,12 +76,12 @@ void test_row2row_stream_tiler() {
     Row2RowStreamTiler<R, C, M / R, Chunk> tiler(group_stream.out);
 
     // Validate the tiler output against the ground-truth
-    assert(all_equal(tiler.out, tile_stream.out));
+    BOOST_CHECK(all_equal(tiler.out, tile_stream.out));
 }
 
 // Tests tiling a row-major order matrix stream into a col-major oder stream of
 // tiles
-void test_row2col_stream_tiler() {
+BOOST_AUTO_TEST_CASE(test_row2col_stream_tiler) {
     // Generate a random matrix
     auto matrix = rand_matrix<TestType, M, N>();
     // Tiles are transposed to col-major as well
@@ -105,12 +105,12 @@ void test_row2col_stream_tiler() {
     );
 
     // Validate the tiler output against the ground-truth
-    assert(all_equal(tiler.out, tile_stream.out));
+    BOOST_CHECK(all_equal(tiler.out, tile_stream.out));
 }
 
 // Tests tiling a col-major order matrix stream into a col-major oder stream of
 // tiles
-void test_col2col_stream_tiler() {
+BOOST_AUTO_TEST_CASE(test_col2col_stream_tiler) {
     // Generate a random matrix
     auto matrix = rand_matrix<TestType, M, N>();
     // Tile and flatten the matrix; Tiles are transposed to col-major as well
@@ -131,12 +131,12 @@ void test_col2col_stream_tiler() {
     Col2ColStreamTiler<R, C, N / C, Chunk> tiler(group_stream.out);
 
     // Validate the tiler output against the ground-truth
-    assert(all_equal(tiler.out, tile_stream.out));
+    BOOST_CHECK(all_equal(tiler.out, tile_stream.out));
 }
 
 // Tests tiling a col-major order matrix stream into a row-major oder stream of
 // tiles
-void test_col2row_stream_tiler() {
+BOOST_AUTO_TEST_CASE(test_col2row_stream_tiler) {
     // Generate a random matrix
     auto matrix = rand_matrix<TestType, M, N>();
     // Tile and flatten the matrix
@@ -160,21 +160,5 @@ void test_col2row_stream_tiler() {
     );
 
     // Validate the tiler output against the ground-truth
-    assert(all_equal(tiler.out, tile_stream.out));
-}
-
-// Program entrypoint
-int main(int, char**) {
-    // Test plain adaptation of matrix order (no tiling or grouping of elements)
-    test_row2col_adapter();
-    test_col2row_adapter();
-
-    // Test actual tiling os streams in all order combinations
-    test_row2row_stream_tiler();
-    test_row2col_stream_tiler();
-    test_col2col_stream_tiler();
-    test_col2row_stream_tiler();
-
-    // No error, exit with status code "ok"
-    return EXIT_SUCCESS;
+    BOOST_CHECK(all_equal(tiler.out, tile_stream.out));
 }
