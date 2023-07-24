@@ -13,6 +13,12 @@
 //  Note: This un-swizzles as well: Flip SIMD and PE to invert the operation
 template<unsigned SIMD, unsigned PE, int Width>
     ap_uint<Width> swizzle(const ap_uint<Width> &in) {
+        // The width must at least be divisible by both, SIMD and PE
+        //  Note: This will catch some rather obvious logic errors, but
+        //  unfortunately not subtle things like confusing SIMD and PE.
+        static_assert(
+            Width % (SIMD * PE) == 0, "SIMD and PE must divide Width"
+        );
         // Derive the datatype of a single element
         using Element = ap_uint<Width / SIMD / PE>;
         // The output vector will have the same bit width as the input, the
