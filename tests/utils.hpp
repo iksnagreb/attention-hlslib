@@ -81,6 +81,22 @@ template<std::size_t R, std::size_t C, class Type, std::size_t M, std::size_t N>
         return tiled;
     }
 
+// Transposes a matrix
+template<class Type, std::size_t M, std::size_t N>
+    auto transpose(const Matrix<Type, M, N> &matrix) {
+        // Allocate the matrix on the stack
+        Matrix<Type, N, M> transposed;
+        // Iterate the indices in row-major order
+        for(unsigned i = 0; i < N; ++i) {
+            for(unsigned j = 0; j < M; ++j) {
+                // Copy transposed element
+                transposed[i][j] = matrix[j][i];
+            }
+        }
+        // Return the matrix from the stack by copy
+        return transposed;
+    }
+
 // Flattening of buffers to bit vectors
 #include "flatten.hpp"
 
