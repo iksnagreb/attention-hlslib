@@ -137,7 +137,7 @@ template<unsigned EF, unsigned TF, class Shapes, class Types>
             // Tiling of the streamed value matrix
             //  Note: Tiles need to be transposed. Specifying this here feels
             //  somewhat awkward...
-            VTiler v_tiles(v, Transpose<Shapes::VDim / EF>{}, Shapes::QLen);
+            VTiler v_tiles(v, Transpose<O_ELEMS>{}, Shapes::QLen);
 
             // Query x Keys multiplication producing raw, not-yet-normalized,
             // not-yet-masked attention weights
