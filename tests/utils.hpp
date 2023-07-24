@@ -25,7 +25,7 @@ template<class Type, std::size_t M, std::size_t N>
         for(unsigned i = 0; i < M; ++i) {
             for(unsigned j = 0; j < N; ++j) {
                 // Generate random number in range 0 to 2 ^ Type::width
-                matrix[i][j] = std::rand() % (2 << Type::width);
+                matrix[i][j] = std::rand() % (1 << Type::width);
             }
         }
         // Return the matrix from the stack by copy
