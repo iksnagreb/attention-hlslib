@@ -25,7 +25,23 @@ template<class Type, std::size_t M, std::size_t N>
         for(unsigned i = 0; i < M; ++i) {
             for(unsigned j = 0; j < N; ++j) {
                 // Generate random number in range 0 to 2 ^ Type::width
-                matrix[i][j] = std::rand() % (1 << Type::width);
+                matrix[i][j] = std::rand() % (1 << Type::width);  // NOLINT
+            }
+        }
+        // Return the matrix from the stack by copy
+        return matrix;
+    }
+
+// Creates a randomly filled matrix of shape M x N of Type
+template<std::size_t M, std::size_t N>
+    Matrix<float, M, N> randf_matrix() {
+        // Allocate the matrix on the stack
+        Matrix<float, M, N> matrix;
+        // Iterate the indices in row-major order
+        for(unsigned i = 0; i < M; ++i) {
+            for(unsigned j = 0; j < N; ++j) {
+                // Generate random number in range 0.0 to 1.0
+                matrix[i][j] = float(std::rand()) / float(RAND_MAX);   // NOLINT
             }
         }
         // Return the matrix from the stack by copy
@@ -174,6 +190,23 @@ template<class Type, std::size_t M, std::size_t N>
             for(unsigned j = 0; j < N; ++j) {
                 // If any pair of elements is not equal, the matrices differ
                 if(lhs[i][j] != rhs[i][j]) {
+                    return false;
+                }
+            }
+        }
+        // All elements are equal
+        return true;
+    }
+
+// Compares two matrices element-by-element
+template<class Type, std::size_t M, std::size_t N>
+    bool all_close(const Matrix<Type, M, N> &lhs, const Matrix<Type, M, N> &rhs,
+                   const Type epsilon) {
+        // Iterate the indices in row-major order
+        for(unsigned i = 0; i < M; ++i) {
+            for(unsigned j = 0; j < N; ++j) {
+                // If any pair of elements is not equal, the matrices differ
+                if(std::abs(lhs[i][j] - rhs[i][j]) > epsilon) {
                     return false;
                 }
             }
@@ -332,6 +365,119 @@ template<class Type, std::size_t N>
                     out.write(buffer(i, 0));
                 }
             }
+        }
+    };
+
+// Softmax normalizes a vector of N floats
+template<std::size_t N>
+    std::array<float, N> softmax(const std::array<float, N> &x) {
+        // Allocate a result vector of the same size on the stack
+        std::array<float, N> y{};
+        // Track the total, maximum value and the number of occurrences of the
+        // maximum value for overflow handling
+        // @formatter:off
+        float total = 0.0, max_value = -INFINITY; std::size_t max_count = 0;
+        // @formatter:on
+
+        // First pass over the input values to compute exp(x) and track maximum
+        for(std::size_t i = 0; i < N; ++i) {
+            // Keep track of the maximum value encountered
+            if(max_value < x[i] || max_count == 0) {
+                // New maximum, occurred once
+                max_value = x[i];
+                max_count = 1;
+            } else if(max_value == x[i]) {
+                // Got the old maximum again
+                max_count++;
+            }
+            // Compute exp(x) to output buffer and accumulate total
+            total += y[i] = std::exp(x[i]);
+        }
+
+        // Second pass over values to normalize and handle overflow
+        for(std::size_t i = 0; i < N; ++i) {
+            // Overflow handling
+            if(std::isinf(total)) {
+                // In case of an overflow, distribute equal weight to all
+                // occurrences of the maximum value, such that the weights still
+                // sum to one.
+                y[i] = x[i] == max_value ? 1.0f / float(max_count) : 0.0f;
+            } else {
+                // In case of no overflow, normalize the exponential values by
+                // the accumulated total
+                y[i] = y[i] / total;
+            }
+        }
+
+        // Return the stack-allocated results by copy
+        return y;
+    }
+
+// Softmax normalizes each row of the matrix
+template<std::size_t M, std::size_t N>
+    Matrix<float, M, N> softmax(const Matrix<float, M, N> &xs) {
+        // Allocate the matrix on the stack
+        Matrix<float, M, N> ys;
+        // Iterate the indices in row-major order
+        for(unsigned i = 0; i < M; ++i) {
+            // Softmax normalize the row
+            ys[i] = softmax(xs[i]);
+        }
+        // Return the matrix from the stack by copy
+        return ys;
+    }
+
+// Quantizes a matrix to integer representation using Width bits
+template<std::size_t Width, std::size_t M, std::size_t N>
+    struct Quantized {
+        // Integer representation of the inputs using Width bits
+        Matrix<ap_uint<Width>, M, N> z{};
+        // Scale factor and bias for mapping the range of min to max to the
+        // range of 0 to (2^Width - 1).
+        float scale, bias;
+
+        // Quantizes a float matrix
+        explicit Quantized(const Matrix<float, M, N> &x) {
+            // Find minimum and maximum of the input matrix
+            float min = +INFINITY, max = -INFINITY;
+            // Iterate the indices in row-major order
+            for(unsigned i = 0; i < M; ++i) {
+                for(unsigned j = 0; j < N; ++j) {
+                    // Update minimum if new value is smaller
+                    min = x[i][j] < min ? x[i][j] : min;
+                    // Update maximum if new value is larger
+                    max = x[i][j] > max ? x[i][j] : max;
+                }
+            }
+
+            // 2^Width
+            const auto n = (ap_uint<Width + 1>{1} << Width);
+            // Scale factor and bias for mapping the range of min to max to the
+            // range of 0 to (2^Width - 1).
+            scale = (max - min) / float((n - 1)), bias = min;
+
+            // Iterate the indices in row-major order
+            for(unsigned i = 0; i < M; ++i) {
+                for(unsigned j = 0; j < N; ++j) {
+                    // Quantize the element
+                    z[i][j] = std::round((x[i][j] - bias) / scale);
+                }
+            }
+        }
+
+        // De-quantizes to float representation
+        auto dequantize() const {
+            // Float representation
+            Matrix<float, M, N> x{};
+            // Iterate the indices in row-major order
+            for(unsigned i = 0; i < M; ++i) {
+                for(unsigned j = 0; j < N; ++j) {
+                    // Quantize the element
+                    x[i][j] = scale * z[i][j] + bias;
+                }
+            }
+            // Return the de-quantized representation
+            return x;
         }
     };
 
