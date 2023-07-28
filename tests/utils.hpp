@@ -182,7 +182,8 @@ template<class Lhs, class Rhs, std::size_t M, std::size_t N, std::size_t L>
 
 // Multiplies two matrices
 template<std::size_t M, std::size_t N, std::size_t L>
-    auto matmul(const Matrix<float, M, N> &lhs, const Matrix<float, N, L> &rhs) {
+    auto
+    matmul(const Matrix<float, M, N> &lhs, const Matrix<float, N, L> &rhs) {
         // Allocate the result matrix on the stack
         Matrix<float, M, L> result;
         // Iterate the indices in row-major order
@@ -378,7 +379,9 @@ template<class Type, std::size_t N>
             // Operate as long as there are elements in the input stream
             while(!in.empty()) {
                 // Read and slice next group from the input stream
-                auto buffer = Slice<ap_uint<Type::width / N>>{}(in.read());
+                auto buffer = Slice < ap_uint<Type::width / N>>
+                {}
+                (in.read());
                 // Collect the next N elements into the buffer
                 for(std::size_t i = 0; i < N; ++i) {
                     // Write the next element into the output stream
@@ -433,6 +436,61 @@ template<std::size_t N>
         return y;
     }
 
+// Softmax normalizes a vector of N floats
+template<int Width, std::size_t N>
+    std::array<ap_uint<Width>, N> softmax(
+        const std::array<ap_uint<Width>, N> &x,
+        // Note: Assumes inputs and outputs to cover the whole range of 0.0 to
+        // 1.0 mapped to the 0 to 2^Width - 1 integer range
+        const float iscale = 1.0f / ((ap_uint<Width+1>{1} << Width) - 1),
+        const float oscale = 1.0f / ((ap_uint<Width+1>{1} << Width) - 1),
+        const float bias = 0.0) {
+        // Allocate a result vector of the same size on the stack
+        // @formatter:off
+        std::array<float, N> tmp{}; std::array<ap_uint<Width>, N> y{};
+        // @formatter:on
+        // Track the total, maximum value and the number of occurrences of the
+        // maximum value for overflow handling
+        // @formatter:off
+        float total = 0.0, max_value = -INFINITY; std::size_t max_count = 0;
+        // @formatter:on
+
+        // First pass over the input values to compute exp(x) and track maximum
+        for(std::size_t i = 0; i < N; ++i) {
+            // Keep track of the maximum value encountered
+            if(max_value < x[i] || max_count == 0) {
+                // New maximum, occurred once
+                max_value = x[i];
+                max_count = 1;
+            } else if(max_value == x[i]) {
+                // Got the old maximum again
+                max_count++;
+            }
+            // Compute exp(x) to output buffer and accumulate total
+            total += tmp[i] = std::exp(iscale * float(x[i]));
+        }
+
+        // Second pass over values to normalize and handle overflow
+        for(std::size_t i = 0; i < N; ++i) {
+            // Overflow handling
+            if(std::isinf(total)) {
+                // In case of an overflow, distribute equal weight to all
+                // occurrences of the maximum value, such that the weights still
+                // sum to one.
+                tmp[i] = x[i] == max_value ? 1.0f / float(max_count) : 0.0f;
+            } else {
+                // In case of no overflow, normalize the exponential values by
+                // the accumulated total
+                tmp[i] = tmp[i] / total;
+            }
+            // Shift and scale the output back to integer representation
+            y[i] = std::round((tmp[i] - bias) / oscale);
+        }
+
+        // Return the stack-allocated results by copy
+        return y;
+    }
+
 // Softmax normalizes each row of the matrix
 template<std::size_t M, std::size_t N>
     Matrix<float, M, N> softmax(const Matrix<float, M, N> &xs) {
@@ -442,6 +500,26 @@ template<std::size_t M, std::size_t N>
         for(unsigned i = 0; i < M; ++i) {
             // Softmax normalize the row
             ys[i] = softmax(xs[i]);
+        }
+        // Return the matrix from the stack by copy
+        return ys;
+    }
+
+// Softmax normalizes each row of the matrix
+template<int Width, std::size_t M, std::size_t N>
+    Matrix<ap_uint<Width>, M, N> softmax(
+        const Matrix<ap_uint<Width>, M, N> &xs,
+        // Note: Assumes inputs and outputs to cover the whole range of 0.0 to
+        // 1.0 mapped to the 0 to 2^Width - 1 integer range
+        const float iscale = 1.0f / ((ap_uint<Width+1>{1} << Width) - 1),
+        const float oscale = 1.0f / ((ap_uint<Width+1>{1} << Width) - 1),
+        const float bias = 0.0) {
+        // Allocate the matrix on the stack
+        Matrix<ap_uint<Width>, M, N> ys;
+        // Iterate the indices in row-major order
+        for(unsigned i = 0; i < M; ++i) {
+            // Softmax normalize the row
+            ys[i] = softmax(xs[i], iscale, oscale, bias);
         }
         // Return the matrix from the stack by copy
         return ys;

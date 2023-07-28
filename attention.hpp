@@ -10,6 +10,8 @@
 #include "stream_tiler.hpp"
 // Stream matrix-matrix multiplication
 #include "matmul.hpp"
+// Stream softmax normalization
+#include "softmax.hpp"
 
 // Wrap config containers in a namespace to not clutter the global namespace
 // with generic terms like "Shapes" and "Types"...
@@ -115,16 +117,6 @@ template<unsigned EF, unsigned TF, class Shapes, class Types>
             TF, EF, Shapes::KVLen / TF, O_ELEMS, typename Types::AType, VTile
         >;
 
-        // As long as there is no softmax and/or datatype conversion
-        // implemented, the output type of the QK matmul must be the attention
-        // weights type.
-        //  TODO: Remove/Refine this assertion as soon as softmax is implemented
-        static_assert(
-            std::is_same<
-                typename Types::AType, typename QKMatMul::OutType>::value,
-            "Mismatch of specified and derived type of attention weights"
-        );
-
         // Output stream of the operator
         //  TODO: Automatically derives the output type. Should this be
         //   specified via Types as well?
@@ -143,11 +135,27 @@ template<unsigned EF, unsigned TF, class Shapes, class Types>
             // not-yet-masked attention weights
             QKMatMul matmul1(q, k_tiles.out, Shapes::QLen);
 
-            // Dummy attention weights stream. TODO: Replace by softmax
-            hls::stream<typename Types::AType> &a = matmul1.out;
+            // Parallel elements of the attention weights stream
+            constexpr auto PE = (Shapes::KVLen / TF);
+            // Width of the attention weights (input and output) required to
+            // compute dummy scale-factors
+            constexpr auto IWidth = Types::AType::width / PE;
+            constexpr auto OWidth = QKMatMul::OutType::width / PE;
+
+            // Compute input and output scale-factors such that softmax covers
+            // the input and output range of 0.0 to 1.0 mapped to 0 to 2^Width.
+            //  TODO: These should be properly specified from the outside
+            //   according to actual ranges and quantization parameters...
+            auto oscale = 1.0f / ((ap_uint<IWidth+1>{1} << IWidth) - 1);
+            auto iscale = 1.0f / ((ap_uint<OWidth+1>{1} << OWidth) - 1);
+
+            // Normalize the attention weights via softmax
+            Softmax<TF, Shapes::KVLen / TF, typename Types::AType> a(
+                matmul1.out, iscale, oscale, /*bias=*/0.0f, Shapes::QLen
+            );
 
             // Attention Weights x Values multiplication producing the output
-            AVMatMul matmul2(a, v_tiles.out, Shapes::QLen);
+            AVMatMul matmul2(a.out, v_tiles.out, Shapes::QLen);
 
             // Moves data from second matmul output to operator output
             //  Note: This probably adds one cycle delay?

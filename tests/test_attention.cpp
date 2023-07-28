@@ -21,7 +21,10 @@ using Types = attention::Types<
     /*QType_=*/ap_uint<4>,
     /*KType_=*/ap_uint<4>,
     /*VType_=*/ap_uint<4>,
-    /*AType_=*/ap_uint<4>
+    // TODO: It is kind of awkward to adapt the config here to match the tests
+    //  below. Should be the other way round, such that the ground truth casts
+    //  to what is specified here...
+    /*AType_=*/ap_uint<11>
 >;
 
 // Embedding fold (EF) and temporal fold (TF) to be used for testing attention
@@ -38,7 +41,8 @@ BOOST_AUTO_TEST_CASE(test_scaled_dot_product_attention_no_mask) {
 
     // Compute the attention weights from queries and keys
     auto a = matmul(q, transpose(k));
-    // TODO: Softmax normalization of attention weights
+    // Normalization of attention weights
+    a = softmax(a);
     // Apply the attention weights to the values
     auto o = matmul(a, v);
 
@@ -68,7 +72,7 @@ BOOST_AUTO_TEST_CASE(test_scaled_dot_product_attention_no_mask) {
         /*QType_=*/ap_uint<Types::QType::width * Shapes::QKDim / EF>,
         /*KType_=*/ap_uint<Types::KType::width * Shapes::QKDim / EF>,
         /*VType_=*/ap_uint<Types::VType::width * Shapes::VDim / EF>,
-        /*AType_=*/ap_uint<AType::width * Shapes::KVLen / TF>
+        /*AType_=*/ap_uint<Types::AType::width * Shapes::KVLen / TF>
     >;
 
     // Feed the attention operator with folded streams
