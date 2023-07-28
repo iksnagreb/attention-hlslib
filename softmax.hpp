@@ -18,7 +18,6 @@
 // Flattening of buffers to bit vectors
 #include "flatten.hpp"
 
-
 // Streaming softmax heavily inspired by Xilinx finn-hlslib
 //  Note: This is basically the same as the one in Xilinx finn-hlslib, just with
 //      input scaling added before exp().
@@ -150,7 +149,7 @@ template<std::size_t Len, std::size_t PE, class OType>
                 hls::stream<float> weights;
                 // Repeatedly apply softmax to the elementwise stream
                 for(std::size_t i = 0; i < rep; ++i) {
-                    softmax<Len*PE>(elems, weights, iscale);
+                    softmax<Len * PE>(elems, weights, iscale);
                 }
 
                 // Buffer collecting PE elements
