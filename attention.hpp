@@ -34,7 +34,7 @@ template<unsigned QKDim_, unsigned QLen_, unsigned VDim_, unsigned KVLen_>
         template<unsigned EF, unsigned TF>
             static constexpr bool is_valid_folding =
                 // All shapes must be multiples of their corresponding fold
-                !(QKDim % EF) && !(QLen % TF) && !(VDim % EF) && !(KVLen % TF);
+                !(QKDim % EF) && !(VDim % EF) && !(KVLen % TF);
     };
 
 // Container struct for attention type configuration
