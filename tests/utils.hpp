@@ -180,6 +180,26 @@ template<class Lhs, class Rhs, std::size_t M, std::size_t N, std::size_t L>
         return result;
     }
 
+// Multiplies two matrices
+template<std::size_t M, std::size_t N, std::size_t L>
+    auto matmul(const Matrix<float, M, N> &lhs, const Matrix<float, N, L> &rhs) {
+        // Allocate the result matrix on the stack
+        Matrix<float, M, L> result;
+        // Iterate the indices in row-major order
+        for(unsigned i = 0; i < M; ++i) {
+            for(unsigned j = 0; j < L; ++j) {
+                // Clear the accumulator
+                result[i][j] = 0;
+                // Iterate the common dimension, i.e. accumulate the dot-product
+                for(unsigned k = 0; k < N; ++k) {
+                    // Accumulate the dot-product
+                    result[i][j] += lhs[i][k] * rhs[k][j];
+                }
+            }
+        }
+        // Return the matrix from the stack by copy
+        return result;
+    }
 
 // Compares two matrices element-by-element
 template<class Type, std::size_t M, std::size_t N>
@@ -480,5 +500,11 @@ template<std::size_t Width, std::size_t M, std::size_t N>
             return x;
         }
     };
+
+// Quantizes matrix with Type/Size deduction
+template<class Type, std::size_t M, std::size_t N>
+    auto quantize(const Matrix<float, M, N> &matrix) {
+        return Quantized<Type::width, M, N>{matrix};
+    }
 
 #endif //ATTENTION_HLSLIB_UTILS_HPP
