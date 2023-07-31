@@ -132,6 +132,8 @@ template<std::size_t Len, std::size_t PE, class OType>
 
                 // Stream of single elements
                 hls::stream<ap_uint<Type::width / PE>> elems;
+// Buffer stream with depth to fit the entire input stream length
+#pragma HLS stream variable=elems depth=rep * Len * PE
                 // Adapt the input stream of PE parallel elements to a single
                 // element stream.
                 // Operate as long as there are elements in the input stream
@@ -147,6 +149,8 @@ template<std::size_t Len, std::size_t PE, class OType>
 
                 // Softmax weight stream in floating-point representation
                 hls::stream<float> weights;
+// Buffer stream with depth to fit the entire input stream length
+#pragma HLS stream variable=weights depth=rep * Len * PE
                 // Repeatedly apply softmax to the elementwise stream
                 for(std::size_t i = 0; i < rep; ++i) {
                     softmax<Len * PE>(elems, weights, iscale);

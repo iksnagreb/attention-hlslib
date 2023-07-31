@@ -135,6 +135,8 @@ template<
             // @formatter:on
 
             // TODO: This is rather sequential...
+// Set depth of the tile stream to fit the entire input stream length
+#pragma HLS stream variable=out depth=rep * SF * NF
 
             // Iterate tile indices according to the specified output order
             OOrder<SF, NF, 1> o_index;
@@ -161,6 +163,8 @@ template<
                 // @formatter:on
 
                 // TODO: This is rather sequential...
+// Set depth of the tile stream to fit the entire input stream length
+#pragma HLS stream variable=out depth=rep * SF * NF
 
                 // Iterate tile indices according to the specified output order
                 OOrder<SF, NF, 1> o_index;

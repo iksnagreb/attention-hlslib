@@ -40,7 +40,8 @@ template<unsigned QKDim_, unsigned QLen_, unsigned VDim_, unsigned KVLen_>
     };
 
 // Container struct for attention type configuration
-template<class QType_, class KType_, class VType_, class AType_>
+template<
+    class QType_, class KType_, class VType_, class AType_, class OType_ = void>
     struct Types {
         // Datatype of the query input stream elements
         using QType = QType_;
@@ -53,6 +54,9 @@ template<class QType_, class KType_, class VType_, class AType_>
 
         // Datatype of the attention weights stream elements
         using AType = AType_;
+
+        // Datatype of the output
+        using OType = OType_;
 
         // Flag for validating template arguments of the attention mechanism
         static constexpr bool is_attention_types = true;
@@ -134,6 +138,8 @@ template<unsigned EF, unsigned TF, class Shapes, class Types>
             // Query x Keys multiplication producing raw, not-yet-normalized,
             // not-yet-masked attention weights
             QKMatMul matmul1(q, k_tiles.out, Shapes::QLen);
+// Set depth of the output stream to fit the entire output length
+#pragma HLS stream variable=matmul1.out depth=Shapes::QLen * TF
 
             // Parallel elements of the attention weights stream
             constexpr auto PE = (Shapes::KVLen / TF);
@@ -146,17 +152,23 @@ template<unsigned EF, unsigned TF, class Shapes, class Types>
             // the input and output range of 0.0 to 1.0 mapped to 0 to 2^Width.
             //  TODO: These should be properly specified from the outside
             //   according to actual ranges and quantization parameters...
-            auto oscale = 1.0f / ((ap_uint<IWidth+1>{1} << IWidth) - 1);
-            auto iscale = 1.0f / ((ap_uint<OWidth+1>{1} << OWidth) - 1);
+            auto oscale = 1.0f / ((ap_uint<IWidth + 1>{1} << IWidth) - 1);
+            auto iscale = 1.0f / ((ap_uint<OWidth + 1>{1} << OWidth) - 1);
 
             // Normalize the attention weights via softmax
             Softmax<TF, Shapes::KVLen / TF, typename Types::AType> a(
                 matmul1.out, iscale, oscale, /*bias=*/0.0f, Shapes::QLen
             );
+// Set depth of the output stream to fit the entire output length
+#pragma HLS stream variable=a.out depth=Shapes::QLen * TF
 
             // Attention Weights x Values multiplication producing the output
             AVMatMul matmul2(a.out, v_tiles.out, Shapes::QLen);
+// Set depth of the output stream to fit the entire output length
+#pragma HLS stream variable=matmul2.out depth=Shapes::QLen * EF
 
+// Set depth of the output stream to fit the entire output length
+#pragma HLS stream variable=out depth=Shapes::QLen * EF
             // Moves data from second matmul output to operator output
             //  Note: This probably adds one cycle delay?
             for(unsigned i = 0; i < Shapes::QLen * EF; ++i) {

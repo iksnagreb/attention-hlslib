@@ -72,6 +72,9 @@ template<
             // Actual loop variables mapping to the tile indices sf and nf
             unsigned sf = 0, nf = 0;
 
+// Set depth of the output stream to fit the entire output length
+#pragma HLS stream variable=out depth=len * NF
+
             // Process in a flat loop over all parallel output elements
             for(unsigned i = 0; i < len * NF * SF; ++i) {
                 // Currently processed chunk of the left hand side
