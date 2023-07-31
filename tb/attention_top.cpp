@@ -7,11 +7,11 @@
 #include "attention_config.hpp"
 
 // Synthesizeable testbench top of the attention operator
-void attention_top(QStream &q, QStream &k, VStream &v, OStream &out) {
+void attention_top(QStream &q, KStream &k, VStream &v, OStream &out) {
     // Instantiate the attention operator and connect to the input streams
     ScaledDotProductAttention<EF, TF, Shapes, GroupedTypes> attention(q, k, v);
     // Transfer from input to output stream
-    while(!attention.out.empty()) {
+    for(std::size_t i = 0; i < Shapes::QLen * EF; ++i) {
         out.write(attention.out.read());
     }
 }

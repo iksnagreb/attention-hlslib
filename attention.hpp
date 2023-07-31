@@ -130,10 +130,14 @@ template<unsigned EF, unsigned TF, class Shapes, class Types>
         ScaledDotProductAttention(QStream &q, KStream &k, VStream &v) {
             // Tiling of the streamed key matrix
             KTiler k_tiles(k, Shapes::QLen);
+// Set depth of the output stream to fit the entire output length
+#pragma HLS stream variable=k_tiles.out depth=Shapes::QLen * TF * EF
             // Tiling of the streamed value matrix
             //  Note: Tiles need to be transposed. Specifying this here feels
             //  somewhat awkward...
             VTiler v_tiles(v, Transpose<O_ELEMS>{}, Shapes::QLen);
+// Set depth of the output stream to fit the entire output length
+#pragma HLS stream variable=v_tiles.out depth=Shapes::QLen * TF * EF
 
             // Query x Keys multiplication producing raw, not-yet-normalized,
             // not-yet-masked attention weights

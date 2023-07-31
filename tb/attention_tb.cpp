@@ -12,7 +12,7 @@
 // Computes scaled dot-product attention is software
 void attention_sw(QMatrix &q, KMatrix &k, VMatrix &v, OMatrix &o) {
     // Compute the attention weights from queries and keys
-    auto a = matmul(q, transpose(k));
+    AMatrix a = matmul(q, transpose(k));
     // Normalization of attention weights
     a = softmax(a);
     // Apply the attention weights to the values

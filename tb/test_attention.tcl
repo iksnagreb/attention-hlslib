@@ -1,10 +1,10 @@
 # Open a project for this testbench
 open_project tb_attention
 # Add the source file containing the attention operator top
-add_files attention_top.cpp -cflags "--std=c++14 -I$::env(FINN_HLSLIB)
+add_files attention_top.cpp -cflags "--std=c++14 -I$::env(FINN_HLSLIB) \
  -I$::env(ATTENTION_HLSLIB) -I$::env(ATTENTION_HLSLIB)/tb"
 # Add the testbench main source
-add_files -tb attention_tb.cpp -cflags "--std=c++14 -I$::env(FINN_HLSLIB)
+add_files -tb attention_tb.cpp -cflags "--std=c++14 -I$::env(FINN_HLSLIB) \
  -I$::env(ATTENTION_HLSLIB) -I$::env(ATTENTION_HLSLIB)/tb"
 # Configure the top entity of the design, i.e. the attention operator to test
 set_top attention_top

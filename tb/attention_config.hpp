@@ -40,6 +40,7 @@ using GroupedTypes = attention::Types<
 using QMatrix = Matrix<Types::QType, Shapes::QLen, Shapes::QKDim>;
 using KMatrix = Matrix<Types::KType, Shapes::KVLen, Shapes::QKDim>;
 using VMatrix = Matrix<Types::VType, Shapes::KVLen, Shapes::VDim>;
+using AMatrix = Matrix<Types::AType, Shapes::QLen, Shapes::KVLen>;
 using OMatrix = Matrix<Types::OType, Shapes::QLen, Shapes::VDim>;
 
 // Short type aliases for streams connecting top in testbench

@@ -129,7 +129,8 @@ template<std::size_t Len, std::size_t PE, class OType>
                 // TODO: Can the following be synthesized and pipelined?
                 // TODO: Parallelize properly to get rid of the splitting,
                 //  merging and data-width conversions.
-
+// Allow functions and loops to overlap in the following
+#pragma HLS dataflow
                 // Stream of single elements
                 hls::stream<ap_uint<Type::width / PE>> elems;
 // Buffer stream with depth to fit the entire input stream length
