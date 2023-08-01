@@ -22,7 +22,6 @@ csim_design
 # Synthesize the HLS design to RTL
 csynth_design
 # Run cosimulation of the C++ testbench and RTL design
-# TODO: Currently this fails, but why?
 cosim_design
 
 # Done
