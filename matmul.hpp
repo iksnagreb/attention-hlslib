@@ -77,6 +77,8 @@ template<
 
             // Process in a flat loop over all parallel output elements
             for(unsigned i = 0; i < len * NF * SF; ++i) {
+// Pipeline the steps of this loop
+#pragma HLS pipeline II=1 style=flp
                 // Currently processed chunk of the left hand side
                 LhsChunk lhs_chunk;
                 // A zero neuron fold tile index along the PE dimension

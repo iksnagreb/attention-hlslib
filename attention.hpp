@@ -128,6 +128,8 @@ template<unsigned EF, unsigned TF, class Shapes, class Types>
 
         // Computes streamed scaled dot-product attention without masking
         ScaledDotProductAttention(QStream &q, KStream &k, VStream &v) {
+// Allow functions and loops to overlap in the following
+#pragma HLS dataflow
             // Tiling of the streamed key matrix
             KTiler k_tiles(k, Shapes::QLen);
 // Set depth of the output stream to fit the entire output length

@@ -129,6 +129,8 @@ template<
         //  Example: S=3, N=4; Enumerate elements in each chunk: | 1 2 3 |
         //      Each tile will have layout like: | 123 123 123 123 |
         explicit StreamTiler(hls::stream<Type> &in, const unsigned rep = 1) {
+// Allow functions and loops to overlap in the following
+#pragma HLS dataflow
             // Completely buffer the whole input matrix organized as tiles
             // @formatter:off
             Tile buffer[SF][NF]; read2buffer(in, buffer);
@@ -157,6 +159,8 @@ template<
         template<unsigned S>
             StreamTiler(
                 hls::stream<Type> &in, Transpose<S>, const unsigned rep = 1) {
+// Allow functions and loops to overlap in the following
+#pragma HLS dataflow
                 // Completely buffer the whole input matrix organized as tiles
                 // @formatter:off
                 Tile buffer[SF][NF]; read2buffer(in, buffer);
