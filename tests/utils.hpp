@@ -3,14 +3,57 @@
 
 // Use nested std::array to represent a matrix
 #include <array>
+// std::unique_ptr
+#include <memory>
 // std::rand
 #include <cstdlib>
 // std::printf
 #include <cstdio>
 
-// Matrix of shape M x N of Type
+// Matrix of shape M x N of Type: This sis essentially a wrapper around a heap
+// allocated, nested std::array. Heap allocation is necessary for simulating
+// large, i.e. real-world sample inputs to the attention operator.
 template<class Type, std::size_t M, std::size_t N>
-    using Matrix = std::array<std::array<Type, N>, M>;
+    class Matrix {
+        // Put the nested array into a unique pointer which can be heap
+        // allocated and is managed automatically
+        std::unique_ptr<std::array<std::array<Type, N>, M>> matrix;
+
+    public:
+        // Allocates an empty matrix on the heap
+        Matrix()
+            : matrix{std::make_unique<std::array<std::array<Type, N>, M>>()} {}
+
+        // Copy construction of a matrix on the heap
+        Matrix(const Matrix &m)
+            : matrix{
+            std::make_unique<std::array<std::array<Type, N>, M>>(*(m.matrix))
+        } {}
+
+        // First level indexing operator of a const matrix. Returns the
+        // second-level matrix by value, i.e. does not allow for modification.
+        std::array<Type, N> operator[] (std::size_t index) const {
+            return (*matrix)[index];
+        }
+
+        // First level indexing operator of a non-const matrix. Returns
+        // reference to the second-level matrix allowing modification.
+        std::array<Type, N> & operator[] (std::size_t index) {
+            return (*matrix)[index];
+        }
+
+        // Copy-assignment operator (must be non-const as it modifies). Does not
+        // reallocate memory, just copies all elements
+        Matrix & operator= (const Matrix &m) {
+            // Copy all elements of the nested array (relies on copy assignment
+            // of std::array)
+            *matrix = *(m.matrix);
+            // Return a reference to the (modified) object itself for operator
+            // chaining
+            return *this;
+        }
+    };
+
 
 // Tiled matrix of R x C tiles each of M x N elements of type
 template<class Type, std::size_t R, std::size_t C, std::size_t M, std::size_t N>
