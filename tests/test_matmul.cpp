@@ -21,6 +21,9 @@ static constexpr std::size_t M = 12;
 static constexpr std::size_t N = 15;
 static constexpr std::size_t R =  4;  // Tile rows
 static constexpr std::size_t C =  3;  // Tile cols
+static constexpr std::size_t TH = M / R; // Tile height
+static constexpr std::size_t TW = N / C; // Tile width
+
 
 // Tests matmul of two elementwise streams without adaptation
 BOOST_AUTO_TEST_CASE(test_matmul_elementwise_no_adaptation) {
@@ -43,12 +46,16 @@ BOOST_AUTO_TEST_CASE(test_matmul_elementwise_no_adaptation) {
     RowMajorMatrixStreamer<OutType> stream_c(matrix_c);
 
     // Create the streamed matmul operator to be tested
-    TiledStreamMatMul<M, N, 1, 1, TestType, TestType> matmul(
-        stream_a.out, stream_b.out, L
-    );
+    // @formatter:off
+    using MatMul = MatMul<M, N, 1, 1, TestType, TestType>; MatMul matmul;
+    // @formatter:on
+    // Output stream to be filled by the matmul operator
+    MatMul::OutStream matmul_out;
+    // Apply the matmul operator to the input streams
+    matmul(stream_a.out, stream_b.out, matmul_out, L);
 
     // Compare the streamed matmul to the ground-truth
-    BOOST_CHECK(all_equal(matmul.out, stream_c.out));
+    BOOST_CHECK(all_equal(matmul_out, stream_c.out));
 
     // The two input streams must be empty
     //  Note: Checking for empty outputs is covered by all_equal() above
@@ -81,12 +88,16 @@ BOOST_AUTO_TEST_CASE(test_matmul_elementwise_row2col_adaptation) {
     Row2ColAdapter<M, N, TestType> adapted_b(stream_b.out, Transpose<1>{}, L);
 
     // Create the streamed matmul operator to be tested
-    TiledStreamMatMul<M, N, 1, 1, TestType, TestType> matmul(
-        stream_a.out, adapted_b.out, L
-    );
+    // @formatter:off
+    using MatMul = MatMul<M, N, 1, 1, TestType, TestType>; MatMul matmul;
+    // @formatter:on
+    // Output stream to be filled by the matmul operator
+    MatMul::OutStream matmul_out;
+    // Apply the matmul operator to the input streams
+    matmul(stream_a.out, adapted_b.out, matmul_out, L);
 
     // Compare the streamed matmul to the ground-truth
-    BOOST_CHECK(all_equal(matmul.out, stream_c.out));
+    BOOST_CHECK(all_equal(matmul_out, stream_c.out));
 
     // The two input streams must be empty
     //  Note: Checking for empty outputs is covered by all_equal() above
@@ -131,15 +142,17 @@ BOOST_AUTO_TEST_CASE(test_matmul_tiled_no_adaptation) {
     // Collect the right hand side groups in tiled
     Col2ColStreamTiler<R, C, N / C, RhsChunk> tiled_b(grouped_b.out, L);
 
-    // Derive the tile type of the tiled elements
-    using RhsTile = decltype(tiled_b.out.read());
     // Create the streamed matmul operator to be tested
-    TiledStreamMatMul<R, C, M / R, N / C, LhsChunk, RhsTile> matmul(
-        grouped_a.out, tiled_b.out, L
-    );
+    // @formatter:off
+    using MatMul = MatMul<R, C, TH, TW, TestType, TestType>; MatMul matmul;
+    // @formatter:on
+    // Output stream to be filled by the matmul operator
+    MatMul::OutStream matmul_out;
+    // Apply the matmul operator to the input streams
+    matmul(grouped_a.out, tiled_b.out, matmul_out, L);
 
     // Compare the streamed matmul to the ground-truth
-    BOOST_CHECK(all_equal(matmul.out, grouped_c.out));
+    BOOST_CHECK(all_equal(matmul_out, grouped_c.out));
 
     // The two input streams and the original output stream must be empty
     BOOST_CHECK(stream_a.out.empty());
@@ -193,15 +206,17 @@ BOOST_AUTO_TEST_CASE(test_matmul_tiled_row2col_adaptation) {
         grouped_b.out, Transpose<N / C>{}, L
     );
 
-    // Derive the tile type of the tiled elements
-    using RhsTile = decltype(tiled_b.out.read());
     // Create the streamed matmul operator to be tested
-    TiledStreamMatMul<R, C, M / R, N / C, LhsChunk, RhsTile> matmul(
-        grouped_a.out, tiled_b.out, L
-    );
+    // @formatter:off
+    using MatMul = MatMul<R, C, TH, TW, TestType, TestType>; MatMul matmul;
+    // @formatter:on
+    // Output stream to be filled by the matmul operator
+    MatMul::OutStream matmul_out;
+    // Apply the matmul operator to the input streams
+    matmul(grouped_a.out, tiled_b.out, matmul_out, L);
 
     // Compare the streamed matmul to the ground-truth
-    BOOST_CHECK(all_equal(matmul.out, grouped_c.out));
+    BOOST_CHECK(all_equal(matmul_out, grouped_c.out));
 
     // The two input streams and the original output stream must be empty
     BOOST_CHECK(stream_a.out.empty());
