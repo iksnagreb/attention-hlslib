@@ -87,17 +87,26 @@ template<unsigned EF, unsigned TF, class Shapes, class Types>
         using KStream = hls::stream<typename Types::KType>;
         using VStream = hls::stream<typename Types::VType>;
 
+        // Derive the input (I_ELEMS) and output (O_ELEMS) parallelism from
+        // the new embedding-fold (EF) and temporal-fold (TF) concept
+        static constexpr unsigned I_ELEMS = Shapes::QKDim / EF;
+        static constexpr unsigned O_ELEMS = Shapes::VDim / EF;
+
+        // Derive the type of single input elements to construct the tilers
+        using KElem = ap_uint<Types::KType::width / I_ELEMS>;
+        using VElem = ap_uint<Types::VType::width / O_ELEMS>;
+
         // Key matrix stream tiling: Keys arrive in column-major order and are
         // required in column-major order for multiplication as well.
         using KTiler = Col2ColStreamTiler<
             // Note: Embeddings along columns, Sequence along rows
-            EF, TF, Shapes::KVLen / TF, typename Types::KType
+            KElem, EF, TF, I_ELEMS, Shapes::KVLen / TF
         >;
         // Value matrix stream tiling: Values arrive in row-major order but are
         // required in column-major order for multiplication.
         using VTiler = Row2ColStreamTiler<
             // Note: Sequence along columns, Embeddings along rows
-            TF, EF, Shapes::KVLen / TF, typename Types::VType
+            VElem, TF, EF, O_ELEMS, Shapes::KVLen / TF
         >;
 
         // Datatype of key tiles, i.e. the datatype produced by KTiler stream
@@ -105,10 +114,6 @@ template<unsigned EF, unsigned TF, class Shapes, class Types>
         // Datatype of value tiles, i.e. the datatype produced by VTiler stream
         using VTile = typename VTiler::Tile;
 
-        // Derive the input (I_ELEMS) and output (O_ELEMS) parallelism from
-        // the new embedding-fold (EF) and temporal-fold (TF) concept
-        static constexpr unsigned I_ELEMS = Shapes::QKDim / EF;
-        static constexpr unsigned O_ELEMS = Shapes::VDim / EF;
 
         // MatMul instance configured to do the Query x Key multiplication
         using QKMatMul = TiledStreamMatMul<
@@ -134,10 +139,9 @@ template<unsigned EF, unsigned TF, class Shapes, class Types>
             KTiler k_tiles(k, Shapes::QLen);
 // Set depth of the output stream to fit the entire output length
 #pragma HLS stream variable=k_tiles.out depth=Shapes::QLen * TF * EF
+
             // Tiling of the streamed value matrix
-            //  Note: Tiles need to be transposed. Specifying this here feels
-            //  somewhat awkward...
-            VTiler v_tiles(v, Transpose<O_ELEMS>{}, Shapes::QLen);
+            VTiler v_tiles(v, Shapes::QLen);
 // Set depth of the output stream to fit the entire output length
 #pragma HLS stream variable=v_tiles.out depth=Shapes::QLen * TF * EF
 

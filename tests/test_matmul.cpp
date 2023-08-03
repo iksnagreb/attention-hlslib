@@ -85,7 +85,7 @@ BOOST_AUTO_TEST_CASE(test_matmul_elementwise_row2col_adaptation) {
     RowMajorMatrixStreamer<OutType> stream_c(matrix_c);
 
     // Adapt the order of the right hand side stream to col-major order
-    Row2ColAdapter<M, N, TestType> adapted_b(stream_b.out, Transpose<1>{}, L);
+    Row2ColAdapter<TestType, M, N> adapted_b(stream_b.out, L);
 
     // Create the streamed matmul operator to be tested
     // @formatter:off
@@ -134,13 +134,8 @@ BOOST_AUTO_TEST_CASE(test_matmul_tiled_no_adaptation) {
     // Group the elements such that there are R groups per row
     GroupStreamElements<OutType, N / C> grouped_c(stream_c.out);
 
-
-    // Derive the chunk type of grouped elements
-    using LhsChunk = decltype(grouped_a.out.read());
-    using RhsChunk = decltype(grouped_b.out.read());
-
     // Collect the right hand side groups in tiled
-    Col2ColStreamTiler<R, C, N / C, RhsChunk> tiled_b(grouped_b.out, L);
+    Col2ColStreamTiler<TestType, R, C, TH, TW> tiled_b(grouped_b.out, L);
 
     // Create the streamed matmul operator to be tested
     // @formatter:off
@@ -196,15 +191,8 @@ BOOST_AUTO_TEST_CASE(test_matmul_tiled_row2col_adaptation) {
     // Group the elements such that there are R groups per row
     GroupStreamElements<OutType, N / C> grouped_c(stream_c.out);
 
-
-    // Derive the chunk type of grouped elements
-    using LhsChunk = decltype(grouped_a.out.read());
-    using RhsChunk = decltype(grouped_b.out.read());
-
     // Collect the right hand side groups in tiled
-    Row2ColStreamTiler<R, C, M / R, RhsChunk> tiled_b(
-        grouped_b.out, Transpose<N / C>{}, L
-    );
+    Row2ColStreamTiler<TestType, R, C, TW, TH> tiled_b(grouped_b.out, L);
 
     // Create the streamed matmul operator to be tested
     // @formatter:off

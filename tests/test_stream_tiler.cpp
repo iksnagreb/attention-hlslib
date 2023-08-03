@@ -18,6 +18,8 @@ static constexpr std::size_t M = 12;
 static constexpr std::size_t N = 15;
 static constexpr std::size_t R =  4;  // Tile rows
 static constexpr std::size_t C =  3;  // Tile cols
+static constexpr std::size_t TH = M / R; // Tile height
+static constexpr std::size_t TW = N / C; // Tile width
 
 // Tests row-major to col-major adapter
 BOOST_AUTO_TEST_CASE(test_row2col_adapter) {
@@ -29,7 +31,7 @@ BOOST_AUTO_TEST_CASE(test_row2col_adapter) {
     ColMajorMatrixStreamer<TestType> col_stream(matrix);
 
     // Adapt the row-major stream to col-major order
-    Row2ColAdapter<M, N, TestType> adapted_stream(row_stream.out);
+    Row2ColAdapter<TestType, M, N> adapted_stream(row_stream.out);
 
     // Adapting the row-major stream to col-major order should be identical to
     // directly streaming in col-major order
@@ -46,7 +48,7 @@ BOOST_AUTO_TEST_CASE(test_col2row_adapter) {
     ColMajorMatrixStreamer<TestType> col_stream(matrix);
 
     // Adapt the col-major stream to row-major order
-    Col2RowAdapter<M, N, TestType> adapted_stream(col_stream.out);
+    Col2RowAdapter<TestType, M, N> adapted_stream(col_stream.out);
 
     // Adapting the col-major stream to row-major order should be identical to
     // directly streaming in row-major order
@@ -70,10 +72,8 @@ BOOST_AUTO_TEST_CASE(test_row2row_stream_tiler) {
     // Group the elements such that there are C groups per row
     GroupStreamElements<TestType, N / C> group_stream(elem_stream.out);
 
-    // Derive the chunk type of grouped elements
-    using Chunk = decltype(group_stream.out.read());
     // Tile the group stream such that there are R tiles per column
-    Row2RowStreamTiler<R, C, M / R, Chunk> tiler(group_stream.out);
+    Row2RowStreamTiler<TestType, R, C, TW, TH> tiler(group_stream.out);
 
     // Validate the tiler output against the ground-truth
     BOOST_CHECK(all_equal(tiler.out, tile_stream.out));
@@ -96,13 +96,8 @@ BOOST_AUTO_TEST_CASE(test_row2col_stream_tiler) {
     // Group the elements such that there are C groups per row
     GroupStreamElements<TestType, N / C> group_stream(elem_stream.out);
 
-    // Derive the chunk type of grouped elements
-    using Chunk = decltype(group_stream.out.read());
     // Tile the group stream such that there are R tiles per column
-    Row2ColStreamTiler<R, C, M / R, Chunk> tiler(
-        // Transpose each tile to adapt from row-major to col-major as well
-        group_stream.out, Transpose<N / C>{}
-    );
+    Row2ColStreamTiler<TestType, R, C, TW, TH> tiler(group_stream.out);
 
     // Validate the tiler output against the ground-truth
     BOOST_CHECK(all_equal(tiler.out, tile_stream.out));
@@ -125,10 +120,8 @@ BOOST_AUTO_TEST_CASE(test_col2col_stream_tiler) {
     // Group the elements such that there are R groups per col
     GroupStreamElements<TestType, M / R> group_stream(elem_stream.out);
 
-    // Derive the chunk type of grouped elements
-    using Chunk = decltype(group_stream.out.read());
     // Tile the group stream such that there are R tiles per column
-    Col2ColStreamTiler<R, C, N / C, Chunk> tiler(group_stream.out);
+    Col2ColStreamTiler<TestType, R, C, TH, TW> tiler(group_stream.out);
 
     // Validate the tiler output against the ground-truth
     BOOST_CHECK(all_equal(tiler.out, tile_stream.out));
@@ -151,13 +144,8 @@ BOOST_AUTO_TEST_CASE(test_col2row_stream_tiler) {
     // Group the elements such that there are R groups per col
     GroupStreamElements<TestType, M / R> group_stream(elem_stream.out);
 
-    // Derive the chunk type of grouped elements
-    using Chunk = decltype(group_stream.out.read());
     // Tile the group stream such that there are C tiles per row
-    Col2RowStreamTiler<R, C, N / C, Chunk> tiler(
-        // Transpose each tile to adapt from col-major to row-major as well
-        group_stream.out, Transpose<M / R>{}
-    );
+    Col2RowStreamTiler<TestType, R, C, TH, TW> tiler(group_stream.out);
 
     // Validate the tiler output against the ground-truth
     BOOST_CHECK(all_equal(tiler.out, tile_stream.out));

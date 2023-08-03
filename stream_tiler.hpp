@@ -107,30 +107,43 @@ template<
     template<std::size_t...> class IOrder,
     // Order in which the matrix tiles are produced (RowMajor or ColMajor)
     template<std::size_t...> class OOrder,
+    // Datatype of each individual elements
+    class Elem,
+    // Specifies whether tiles need to be transposed
+    bool Transpose,
     // Number of tile rows on the right hand side
     std::size_t TileRows,
     // Number of tile cols on the right hand side
     std::size_t TileCols,
-    // Number of chunks per tile
-    std::size_t N,
-    // Datatype of each chunk (contains S elements)
-    class Type
+    // Number of grouped input elements, i.e. input parallelism
+    std::size_t GroupSize,
+    // Number of input groups making up a tile
+    std::size_t NumGroups
 >
 // @formatter:on
     struct StreamTiler {
-        // Derive the datatype of a tile:
-        //  Each tile collects N chunks of Type::width elements
-        using Tile = ap_uint<Type::width * N>;
+        // Bitvector type representing a tile
+        //  Each tile collects tile-width x tile-height elements
+        using Tile = ap_uint<Elem::width * GroupSize * NumGroups>;
+        // Bitvector type representing a tile-height parallel input chunk
+        using Chunk = ap_uint<Elem::width * GroupSize>;
 
         // Output data stream of ordered matrix tiles
         hls::stream<Tile> out;
 
-        // Produces a tile stream with N x S layout (S dimension is innermost)
-        //  Note: S is implicitly specified by the Type::width
+        // Produces a tile stream with NumGroups x GroupSize layout (GroupSize
+        // dimension is innermost) if NOT transposed=true
         //
-        //  Example: S=3, N=4; Enumerate elements in each chunk: | 1 2 3 |
+        //  Example: GroupSize=3, NumGroups=4; Each chunk: | 1 2 3 |
         //      Each tile will have layout like: | 123 123 123 123 |
-        explicit StreamTiler(hls::stream<Type> &in, const std::size_t rep = 1) {
+        //
+        // Produces a tile stream with GroupSize x NumGroups layout (NumGroups
+        // dimension is innermost) if transposed=true
+        //
+        //  Example: GroupSize=3, NumGroups=4; Each chunk: | 1 2 3 |
+        //      Each tile will have layout like: | 1111 2222 3333 |
+        explicit StreamTiler(
+            hls::stream<Chunk> &in, const std::size_t rep = 1) {
 // Allow functions and loops to overlap in the following
 #pragma HLS dataflow
             // Completely buffer the whole input matrix organized as tiles
@@ -138,7 +151,6 @@ template<
             Tile buffer[TileRows][TileCols]; read2buffer(in, buffer);
             // @formatter:on
 
-            // TODO: This is rather sequential...
 // Set depth of the tile stream to fit the entire input stream length
 #pragma HLS stream variable=out depth=rep * TileRows * TileCols
 
@@ -147,64 +159,47 @@ template<
             // Repeatedly iterate over all tiles
             for(std::size_t i = 0; i < rep * TileRows * TileCols; ++i) {
                 // Send the next tile into the output stream
-                out.write(buffer[o_index.tr][o_index.tc]);
+                out.write(maybe_transpose(buffer[o_index.tr][o_index.tc]));
                 // Next tile index
                 o_index.next();
             }
         }
 
-        // Produces a tile stream with S x N layout (N dimension is innermost)
-        //  Note: For transpose (swizzle) it is necessary to have S explicitly
-        //
-        //  Example: S=3, N=4; Enumerate elements in each chunk: | 1 2 3 |
-        //      Each tile will have layout like: | 1111 2222 3333 |
-        template<std::size_t S>
-            StreamTiler(
-                hls::stream<Type> &in, Transpose<S>, std::size_t rep = 1) {
-// Allow functions and loops to overlap in the following
-#pragma HLS dataflow
-                // Completely buffer the whole input matrix organized as tiles
-                // @formatter:off
-                Tile buffer[TileRows][TileCols]; read2buffer(in, buffer);
-                // @formatter:on
-
-                // TODO: This is rather sequential...
-// Set depth of the tile stream to fit the entire input stream length
-#pragma HLS stream variable=out depth=rep * TileRows * TileCols
-
-                // Iterate tile indices according to the specified output order
-                OOrder<TileRows, TileCols, 1> o_index;
-                // Repeatedly iterate over all tiles
-                for(std::size_t i = 0; i < rep * TileRows * TileCols; ++i) {
-                    // Send the next tile into the output stream
-                    //  Note: swizzle transposes each tile
-                    out.write(swizzle<S, N>(buffer[o_index.tr][o_index.tc]));
-                    // Next tile index
-                    o_index.next();
-                }
-            }
-
     private:
+        // If specified via template arguments, this transposes a tile. If not,
+        // this will simply pass through the input.
+        static Tile maybe_transpose(const Tile &tile) {
+            // Transpose flag is set as template argument, this should be a
+            // constexpr and might be optimized away (does HLS work this way?)
+            if(Transpose) {
+                // Transpose the tile by swizzling the GroupSize and NumGroups
+                // dimension
+                return swizzle<GroupSize, NumGroups>(tile);
+            }
+            // Pass-Through
+            return tile;
+        }
+
         // Datatype of the internal buffer holding the complete matrix of tiles
         using Buffer = Tile[TileRows][TileCols];
 
         // Shared implementation of stream to buffer reading
-        void read2buffer(hls::stream<Type> &in, Buffer &buffer) {
+        void read2buffer(hls::stream<Chunk> &in, Buffer &buffer) {
 // This is just stream reading logic, should be inlined
 #pragma HLS INLINE
             // Iterate tile and chunk indices according to the specified input
             // order
-            IOrder<TileRows, TileCols, N> i_index;
+            IOrder<TileRows, TileCols, NumGroups> i_index;
             // It takes N cycles to see all chunks of a tile and there are in
             // total TileRows x TileCols tiles to complete the matrix
-            for(std::size_t i = 0; i < N * TileRows * TileCols; ++i) {
+            for(std::size_t i = 0; i < NumGroups * TileRows * TileCols; ++i) {
                 // Current chunk index within a tile
                 std::size_t n = i_index.n;
                 // Reference to the tile to be filled next
                 Tile &tile = buffer[i_index.tr][i_index.tc];
                 // Read the next chunk of data from the input stream into the
                 // tiled buffer
-                tile((n + 1) * Type::width - 1, n * Type::width) = in.read();
+                tile((n + 1) * Chunk::width - 1, n * Chunk::width) = in.read();
                 // Next tile index
                 i_index.next();
             }
@@ -212,39 +207,43 @@ template<
     };
 
 // StreamTiler receiving and producing in column-major order
-template<std::size_t TileRows, std::size_t TileCols, std::size_t N, class Type>
+template<class Type, std::size_t... Sizes>
     using Col2ColStreamTiler = StreamTiler<
-        ColMajor, ColMajor, TileRows, TileCols, N, Type
+        ColMajor, ColMajor, Type, /*Transpose=*/false, Sizes...
     >;
 
 // StreamTiler receiving in row-major order and producing in column-major order
-template<std::size_t TileRows, std::size_t TileCols, std::size_t N, class Type>
+template<class Type, std::size_t... Sizes>
     using Row2ColStreamTiler = StreamTiler<
-        RowMajor, ColMajor, TileRows, TileCols, N, Type
+        // Changing the order requires transposing each tile, i.e. change the
+        // order of the tile as well, not just the order of tiles
+        RowMajor, ColMajor, Type, /*Transpose=*/true, Sizes...
     >;
 
 // StreamTiler receiving and producing in row-major order
-template<std::size_t TileRows, std::size_t TileCols, std::size_t N, class Type>
+template<class Type, std::size_t... Sizes>
     using Row2RowStreamTiler = StreamTiler<
-        RowMajor, RowMajor, TileRows, TileCols, N, Type
+        RowMajor, RowMajor, Type, /*Transpose=*/false, Sizes...
     >;
 
 // StreamTiler receiving in column-major order and producing in row-major order
-template<std::size_t TileRows, std::size_t TileCols, std::size_t N, class Type>
+template<class Type, std::size_t... Sizes>
     using Col2RowStreamTiler = StreamTiler<
-        ColMajor, RowMajor, TileRows, TileCols, N, Type
+        // Changing the order requires transposing each tile, i.e. change the
+        // order of the tile as well, not just the order of tiles
+        ColMajor, RowMajor, Type, /*Transpose=*/true, Sizes...
     >;
 
 // Adapts a stream of chunks from row-major to column-major order
 //  Note: Does not really create tiles, merely buffers all chunks to change the
 //  order.
-template<std::size_t TileRows, std::size_t TileCols, class Type>
-    using Row2ColAdapter = Row2ColStreamTiler<TileRows, TileCols, 1, Type>;
+template<class Type, std::size_t TileRows, std::size_t TileCols>
+    using Row2ColAdapter = Row2ColStreamTiler<Type, TileRows, TileCols, 1, 1>;
 
 // Adapts a stream of chunks from column-major to row-major order
 //  Note: Does not really create tiles, merely buffers all chunks to change the
 //  order.
-template<std::size_t TileRows, std::size_t TileCols, class Type>
-    using Col2RowAdapter = Col2RowStreamTiler<TileRows, TileCols, 1, Type>;
+template<class Type, std::size_t TileRows, std::size_t TileCols>
+    using Col2RowAdapter = Col2RowStreamTiler<Type, TileRows, TileCols, 1, 1>;
 
 #endif // STREAM_TILER_HPP
