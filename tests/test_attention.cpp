@@ -67,7 +67,7 @@ BOOST_AUTO_TEST_CASE(test_scaled_dot_product_attention_no_mask) {
     // activation matmul operations.
     //  Note: This is not really a practically relevant example, but it is easy
     //  to simulate without knowledge of real model parameters and quantization.
-    SDP<
+    ScaledDotProductAttention<
         /*QKDim=*/Shapes::QKDim,
         /*QLen=*/Shapes::QLen,
         /*VDim=*/Shapes::VDim,

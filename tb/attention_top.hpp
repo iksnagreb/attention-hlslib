@@ -34,7 +34,7 @@ static constexpr std::size_t O_ELEMS = Shapes::VDim / EmbFold;
 // activation matmul operations.
 //  Note: This is not really a practically relevant example, but it is easy
 //  to simulate without knowledge of real model parameters and quantization.
-using Attention = SDP<
+using Attention = ScaledDotProductAttention<
     /*QKDim=*/Shapes::QKDim,
     /*QLen=*/Shapes::QLen,
     /*VDim=*/Shapes::VDim,
