@@ -5,18 +5,17 @@
 #include "attention.hpp"
 // Testing utility functions
 #include "tests/utils.hpp"
-
 // Test configuration
-#include "attention_config.hpp"
+#include "attention_top.hpp"
 
 // Computes scaled dot-product attention is software
 void attention_sw(QMatrix &q, KMatrix &k, VMatrix &v, OMatrix &o) {
     // Compute the attention weights from queries and keys
-    AMatrix a = matmul(q, transpose(k));
+    AMatrix a = amatmul<Types::AType>(q, transpose(k));
     // Normalization of attention weights
     a = softmax(a);
     // Apply the attention weights to the values
-    o = matmul(a, v);
+    o = amatmul<Types::OType>(a, v);
 }
 
 // Testbench main function, i.e. entrypoint generating and validating the test
@@ -34,9 +33,7 @@ int main(int, char**) {
     // Generate a stream of the ground-truth outputs
     RowMajorMatrixStreamer<Types::OType> o_elems(o);
     // Group the stream of ground-truth outputs according to configured folding
-    GroupStreamElements<Types::OType, Shapes::VDim / EF> ground_truth(
-        o_elems.out
-    );
+    GroupStreamElements<Types::OType, O_ELEMS> ground_truth(o_elems.out);
 
     // Generate elementwise streams of the input matrices
     RowMajorMatrixStreamer<Types::QType> q_elems(q);
@@ -44,9 +41,9 @@ int main(int, char**) {
     RowMajorMatrixStreamer<Types::VType> v_elems(v);
 
     // Group input streams according to embedding fold (EF) configuration
-    GroupStreamElements<Types::QType, Shapes::QKDim / EF> q_stream(q_elems.out);
-    GroupStreamElements<Types::KType, Shapes::QKDim / EF> k_stream(k_elems.out);
-    GroupStreamElements<Types::VType, Shapes::VDim / EF> v_stream(v_elems.out);
+    GroupStreamElements<Types::QType, I_ELEMS> q_stream(q_elems.out);
+    GroupStreamElements<Types::KType, I_ELEMS> k_stream(k_elems.out);
+    GroupStreamElements<Types::VType, O_ELEMS> v_stream(v_elems.out);
 
     // Target output stream
     OStream out;
