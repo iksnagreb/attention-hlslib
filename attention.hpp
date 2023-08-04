@@ -191,6 +191,12 @@ template<
         QKMatMul qk_matmul;
         AVMatMul av_matmul;
 
+        // Instance object of the softmax normalization function: This might
+        // have scales and an activation function requiring parameters to be
+        // initialized once at construction/compile time and thus cannot be
+        // instantiated within the operator function call.
+        Softmax<SeqFold, S_ELEMS, OutQKMatMul, AType> softmax;
+
         // Output stream instance currently used with the "constructor-call"
         // interface style.
         //  TODO: Maybe switch to the function-call operator style, see new
@@ -224,38 +230,16 @@ template<
 // Set depth of the output stream to fit the entire output length
 #pragma HLS stream variable=qk_out depth=QLen * SeqFold
 
-            // Width of the attention weights (input and output) required to
-            // compute dummy scale-factors
-            constexpr auto IWidth = OutQKMatMul::width;
-            constexpr auto OWidth = AType::width;
-
-            // Compute input and output scale-factors such that softmax covers
-            // the input and output range of 0.0 to 1.0 mapped to 0 to 2^Width.
-            //  TODO: These should be properly specified from the outside
-            //   according to actual ranges and quantization parameters...
-            //  TODO: Something weird is going on with confusing IWidth and
-            //   OWidth and their corresponding scales...
-            auto oscale = 1.0f / ((ap_uint<IWidth + 1>{1} << IWidth) - 1);
-            auto iscale = 1.0f / ((ap_uint<OWidth + 1>{1} << OWidth) - 1);
-
-            // Instance object of the softmax normalization function: Currently
-            // this is the parameter-less, constructor style interface, which
-            // soon needs to be adapted to a function-call operator style to use
-            // the constructor for initializing the not-yet-implemented softmax
-            // output activation (ActSoftmax template argument).
-            //  TODO: Move upwards to be an actual instance object of the
-            //   attention operator with compile-time initialized parameters...
-            //  TODO: The interface does currently not match the element-wise
-            //   type specification style of the tiler and matmul operators...
-            Softmax<SeqFold, S_ELEMS, ap_uint<AType::width * S_ELEMS>> softmax(
-                qk_out, iscale, oscale, /*bias=*/0.0f, QLen
-            );
+            // Normalize the attention weights via softmax feeding some internal
+            // stream connecting to the attention-weights matmul.
+            AStream softmax_out;
+            softmax(qk_out, softmax_out, QLen);
 // Set depth of the output stream to fit the entire output length
-#pragma HLS stream variable=softmax.out depth=QLen * SeqFold
+#pragma HLS stream variable=softmax_out depth=QLen * SeqFold
 
             // Multiply the normalized attention weights to the tiled value
             // stream directly feeding the output stream.
-            av_matmul(softmax.out, v_tiles.out, out, QLen);
+            av_matmul(softmax_out, v_tiles.out, out, QLen);
 // Set depth of the output stream to fit the entire output length
 #pragma HLS stream variable=out depth=QLen * EmbFold
         }

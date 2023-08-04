@@ -14,6 +14,8 @@
 #include <utils.hpp>
 // Slicing of bit vectors
 #include <interpret.hpp>
+// FINN HLSLIB activation functions: e.g. pass-through and thresholds
+#include <activations.hpp>
 
 // Flattening of buffers to bit vectors
 #include "flatten.hpp"
@@ -25,7 +27,8 @@
 //      floating point outputs in range [0.0, 1.0].
 template<std::size_t Len, class Type>
     void softmax(
-        hls::stream<Type> &in, hls::stream<float> &out, float scale = 1.0) {
+        hls::stream<Type> &in, hls::stream<float> &out, float scale = 1.0,
+        float bias = 0.0) {
         // Track the maximum value and the number of maximal values for overflow
         // handling
         // @formatter:off
@@ -66,7 +69,7 @@ template<std::size_t Len, class Type>
             }
 
             // Convert to float, scale and compute exponential function
-            float ex = std::exp(scale * float(x));
+            float ex = std::exp(scale * float(x) + bias);
             // Accumulate for normalizing
             total += ex;
             // Send into the stream for next loop
@@ -107,76 +110,104 @@ template<std::size_t Len, class Type>
         }
     }
 
-// Streaming softmax with PE parallelism handling (but not really in parallel,
-// contains adapter splitting and merging the PEs again) and row-repetition.
-//
-// The outputs are scaled such that the softmax produced range of 0 to 1 is
-// mapped onto the output range specified by oscale and bias.
-template<std::size_t Len, std::size_t PE, class OType>
+// WIP: Refactoring softmax operator: Streaming softmax with GroupSize
+// parallelism handling (but not really in parallel, contains adapter
+// splitting and merging the PEs again).
+template<
+    // Number of input groups making up a complete feature map to be normalized
+    std::size_t NumGroups,
+    // Number of grouped input elements, i.e. input parallelism
+    std::size_t GroupSize,
+    // Datatype of single input elements
+    class IType,
+    // Datatype of single output elements
+    class OType,
+    // Output activation function
+    class Activation = PassThroughActivation<float>
+>
     struct Softmax {
-        // Output stream of integer representation softmax weights
-        hls::stream<OType> out;
+        // Input scale parameters for converting from integer to float
+        // representation: Default such that softmax covers the input range of
+        // 0.0 to 1.0 mapped to 0 to 2^Width
+        //  TODO: These should be properly specified from the outside
+        //   cording to actual ranges and quantization parameters...
+        const float iscale =
+            1.0f / ((ap_uint<IType::width + 1>{1} << IType::width) - 1);
+        const float ibias = 0.0;
+
+        // Output scale parameters for converting from float to integer
+        // representation: Default such that softmax covers the output range of
+        // 0.0 to 1.0 mapped to 0 to 2^Width
+        //  TODO: These should be properly specified from the outside
+        //   cording to actual ranges and quantization parameters...
+        const float oscale =
+            1.0f / ((ap_uint<OType::width + 1>{1} << OType::width) - 1);
+        const float obias = 0.0;
+
+        // Activation function which potentially contains parameter: e.g.
+        // thresholds which need to be initialized at construction/compile time
+        Activation activation;
+
+        // Short names to the input and output streams of parallel elements
+        using IStream = hls::stream<ap_uint<GroupSize * IType::width>>;
+        using OStream = hls::stream<ap_uint<GroupSize * OType::width>>;
 
         // Receives repeated streams of not-normalized values and produces a
         // softmax normalized output stream
-        template<class Type>
-            explicit Softmax(
-                hls::stream<Type> &in,
-                const float iscale = 1.0,
-                const float oscale = 1.0,
-                const float bias = 0.0,
-                const std::size_t rep = 1) {
-                // TODO: Can the following be synthesized and pipelined?
-                // TODO: Parallelize properly to get rid of the splitting,
-                //  merging and data-width conversions.
+        void operator()(IStream &in, OStream &out, const std::size_t rep = 1) {
+            // TODO: Can the following be synthesized and pipelined? Parallelize
+            //  properly to get rid of the splitting, merging and data-width
+            //  conversions.
+            // TODO: Maybe integrate the softmax function above here and fuse
+            //  everything into a single pipelineable loop?
 // Allow functions and loops to overlap in the following
 #pragma HLS dataflow
-                // Stream of single elements
-                hls::stream<ap_uint<Type::width / PE>> elems;
+            // Stream of single elements
+            hls::stream<IType> elems;
 // Buffer stream with depth to fit the entire input stream length
-#pragma HLS stream variable=elems depth=rep * Len * PE
-                // Adapt the input stream of PE parallel elements to a single
-                // element stream.
-                // Operate as long as there are elements in the input stream
-                for(std::size_t i = 0; i < rep * Len; ++i) {
-                    // Read and slice next group from the input stream
-                    auto buffer = Slice<ap_uint<Type::width / PE>>{}(in.read());
-                    // Collect the next N elements into the buffer
-                    for(std::size_t pe = 0; pe < PE; ++pe) {
-                        // Write the next element into the intermediate stream
-                        elems.write(buffer(pe, 0));
-                    }
+#pragma HLS stream variable=elems depth=rep * NumGroups * GroupSize
+            // Adapt the input stream of PE parallel elements to a single
+            // element stream.
+            // Operate as long as there are elements in the input stream
+            for(std::size_t i = 0; i < rep * NumGroups; ++i) {
+                // Read and slice next group from the input stream
+                auto buffer = Slice<IType>{}(in.read());
+                // Collect the next N elements into the buffer
+                for(std::size_t pe = 0; pe < GroupSize; ++pe) {
+                    // Write the next element into the intermediate stream
+                    elems.write(buffer(pe, 0));
                 }
+            }
 
-                // Softmax weight stream in floating-point representation
-                hls::stream<float> weights;
+            // Softmax weight stream in floating-point representation
+            hls::stream<float> weights;
 // Buffer stream with depth to fit the entire input stream length
-#pragma HLS stream variable=weights depth=rep * Len * PE
-                // Repeatedly apply softmax to the elementwise stream
-                for(std::size_t i = 0; i < rep; ++i) {
-                    softmax<Len * PE>(elems, weights, iscale);
-                }
+#pragma HLS stream variable=weights depth=rep * NumGroups * GroupSize
+            // Repeatedly apply softmax to the elementwise stream
+            for(std::size_t i = 0; i < rep; ++i) {
+                softmax<NumGroups * GroupSize>(elems, weights, iscale, ibias);
+            }
 
-                // Buffer collecting PE elements
-                ap_uint<OType::width / PE> buffer[PE];
-                // Operate as long as there are elements in the input stream
-                for(std::size_t i = 0; i < rep * Len; ++i) {
-                    // Collect the next PE elements into the buffer
-                    for(std::size_t pe = 0; pe < PE; ++pe) {
-                        // Read next element into the buffer and scale to cover
-                        // the right output range
-                        buffer[pe] = std::round(
-                            (weights.read() - bias) / oscale
-                        );
-                        // With the last pe element, the buffer is ready to be
-                        // sent into the stream
-                        if(pe == (PE - 1)) {
-                            // Feed the output stream with flattened buffer
-                            out.write(flatten<PE>(buffer));
-                        }
+            // Buffer collecting GroupSize elements
+            OType buffer[GroupSize];
+            // Operate as long as there are elements in the input stream
+            for(std::size_t i = 0; i < rep * NumGroups; ++i) {
+                // Collect the next GroupSize elements into the buffer
+                for(std::size_t pe = 0; pe < GroupSize; ++pe) {
+                    // Read next element into the buffer and scale to cover
+                    // the right output range
+                    buffer[pe] = std::round(activation.activate(
+                        i % rep, pe, (weights.read() - obias) / oscale
+                    ));
+                    // With the last pe element, the buffer is ready to be
+                    // sent into the stream
+                    if(pe == (GroupSize - 1)) {
+                        // Feed the output stream with flattened buffer
+                        out.write(flatten<GroupSize>(buffer));
                     }
                 }
             }
+        }
     };
 
 #endif //ATTENTION_HLSLIB_SOFTMAX_HPP

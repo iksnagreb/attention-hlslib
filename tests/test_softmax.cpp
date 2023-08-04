@@ -42,15 +42,20 @@ BOOST_AUTO_TEST_CASE(test_softmax_simple) {
     // Generate streams of the quantized matrices
     RowMajorMatrixStreamer<TestType> qx_elems(qx.z);
 
-    // Compute softmax normalization over the stream
-    Softmax<N, /*PE=*/1, TestType> softmax(
-        qx_elems.out, qx.scale, qy.scale, qy.bias, /*rep=*/M
-    );
+    // Instantiate a softmax normalization function with quantization scales
+    // inferred above
+    Softmax<N, /*PE=*/1, TestType, TestType> softmax {
+        qx.scale, qx.bias, qy.scale, qy.bias
+    };
+
+    // Normalize all rows of the output matrix
+    decltype(softmax)::OStream softmax_out;
+    softmax(qx_elems.out, softmax_out, /*rep=*/M);
 
     // Matrix to be filled by softmax stream
     decltype(qy) qs = qy;
     // Read the softmax output back into memory
-    RowMajorMatrixStreamer<TestType>::read(softmax.out, qs.z);
+    RowMajorMatrixStreamer<TestType>::read(softmax_out, qs.z);
 
     // Validate results by checking whether dequantized values are within
     // tolerance: Errors should never exceed one "step of scale"
@@ -59,7 +64,7 @@ BOOST_AUTO_TEST_CASE(test_softmax_simple) {
 
     // Sanity checks: All streams should be empty by now
     BOOST_CHECK(qx_elems.out.empty());
-    BOOST_CHECK(softmax.out.empty());
+    BOOST_CHECK(softmax_out.empty());
 }
 
 // Tests the softmax normalization with grouped input stream
@@ -86,14 +91,19 @@ BOOST_AUTO_TEST_CASE(test_softmax_grouped) {
     // Group the input stream into PE parallel elements
     GroupStreamElements<TestType, PE> qx_grouped(qx_elems.out);
 
-    // Compute softmax normalization over the stream
-    Softmax<N / PE, /*PE=*/PE, ap_uint<TestType::width * PE>> softmax(
-        qx_grouped.out, qx.scale, qy.scale, qy.bias, /*rep=*/M
-    );
+    // Instantiate a softmax normalization function with quantization scales
+    // inferred above
+    Softmax<N / PE, /*PE=*/PE, TestType, TestType> softmax {
+        qx.scale, qx.bias, qy.scale, qy.bias
+    };
+
+    // Normalize all rows of the output matrix
+    decltype(softmax)::OStream softmax_out;
+    softmax(qx_grouped.out, softmax_out, /*rep=*/M);
 
     // Split the output stream for validation
     SplitStreamElements<ap_uint<TestType::width * PE>, PE> softmax_elems(
-        softmax.out
+        softmax_out
     );
     // Matrix to be filled by softmax stream
     decltype(qy) qs = qy;
@@ -108,5 +118,5 @@ BOOST_AUTO_TEST_CASE(test_softmax_grouped) {
     // Sanity checks: All streams should be empty by now
     BOOST_CHECK(qx_elems.out.empty());
     BOOST_CHECK(qx_grouped.out.empty());
-    BOOST_CHECK(softmax.out.empty());
+    BOOST_CHECK(softmax_out.empty());
 }
