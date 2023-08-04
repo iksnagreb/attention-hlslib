@@ -223,6 +223,29 @@ template<class Lhs, class Rhs, std::size_t M, std::size_t N, std::size_t L>
         return result;
     }
 
+// Multiplies two matrices with explicitly specified accumulator type
+template<
+    class Acc, class Lhs, class Rhs, std::size_t M, std::size_t N, std::size_t L
+>
+    auto amatmul(const Matrix<Lhs, M, N> &lhs, const Matrix<Rhs, N, L> &rhs) {
+        // Allocate the result matrix on the stack
+        Matrix<Acc, M, L> result;
+        // Iterate the indices in row-major order
+        for(unsigned i = 0; i < M; ++i) {
+            for(unsigned j = 0; j < L; ++j) {
+                // Clear the accumulator
+                result[i][j] = 0;
+                // Iterate the common dimension, i.e. accumulate the dot-product
+                for(unsigned k = 0; k < N; ++k) {
+                    // Accumulate the dot-product
+                    result[i][j] += lhs[i][k] * rhs[k][j];
+                }
+            }
+        }
+        // Return the matrix from the stack by copy
+        return result;
+    }
+
 // Multiplies two matrices
 template<std::size_t M, std::size_t N, std::size_t L>
     auto

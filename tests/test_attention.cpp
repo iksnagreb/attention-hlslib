@@ -21,16 +21,18 @@ using Types = attention::Types<
     /*QType_=*/ap_uint<4>,
     /*KType_=*/ap_uint<4>,
     /*VType_=*/ap_uint<4>,
-    // TODO: It is kind of awkward to adapt the config here to match the tests
-    //  below. Should be the other way round, such that the ground truth casts
-    //  to what is specified here...
-    /*AType_=*/ap_uint<11>
+    /*AType_=*/ap_uint<4>,
+    /*OType_=*/ap_uint<4>
 >;
 
-// Embedding fold (EF) and temporal fold (TF) to be used for testing attention
-static constexpr std::size_t EF = 2;
-static constexpr std::size_t TF = 8;
+// Embedding fold and sequence fold to be used for testing attention
+static constexpr std::size_t EmbFold = 2;
+static constexpr std::size_t SeqFold = 8;
 
+// Derive the input (I_ELEMS) and output (O_ELEMS) parallelism from
+// the new embedding-fold concept
+static constexpr std::size_t I_ELEMS = Shapes::QKDim / EmbFold;
+static constexpr std::size_t O_ELEMS = Shapes::VDim / EmbFold;
 
 // Tests scaled dot-product attention without mask
 BOOST_AUTO_TEST_CASE(test_scaled_dot_product_attention_no_mask) {
@@ -40,19 +42,16 @@ BOOST_AUTO_TEST_CASE(test_scaled_dot_product_attention_no_mask) {
     auto v = rand_matrix<Types::VType, Shapes::KVLen, Shapes::VDim>();
 
     // Compute the attention weights from queries and keys
-    auto a = matmul(q, transpose(k));
+    auto a = amatmul<Types::AType>(q, transpose(k));
     // Normalization of attention weights
     a = softmax(a);
     // Apply the attention weights to the values
-    auto o = matmul(a, v);
-
-    // Derive the datatype of single output elements
-    using OType = std::decay_t<decltype(o[0][0])>;
+    auto o = amatmul<Types::OType>(a, v);
 
     // Generate a stream of the ground-truth outputs
-    RowMajorMatrixStreamer<OType> o_elems(o);
+    RowMajorMatrixStreamer<Types::OType> o_elems(o);
     // Group the stream of ground-truth outputs according to configured folding
-    GroupStreamElements<OType, Shapes::VDim / EF> ground_truth(o_elems.out);
+    GroupStreamElements<Types::OType, O_ELEMS> ground_truth(o_elems.out);
 
     // Generate elementwise streams of the input matrices
     RowMajorMatrixStreamer<Types::QType> q_elems(q);
@@ -60,25 +59,35 @@ BOOST_AUTO_TEST_CASE(test_scaled_dot_product_attention_no_mask) {
     RowMajorMatrixStreamer<Types::VType> v_elems(v);
 
     // Group input streams according to embedding fold (EF) configuration
-    GroupStreamElements<Types::QType, Shapes::QKDim / EF> q_stream(q_elems.out);
-    GroupStreamElements<Types::KType, Shapes::QKDim / EF> k_stream(k_elems.out);
-    GroupStreamElements<Types::VType, Shapes::VDim / EF> v_stream(v_elems.out);
+    GroupStreamElements<Types::QType, I_ELEMS> q_stream(q_elems.out);
+    GroupStreamElements<Types::KType, I_ELEMS> k_stream(k_elems.out);
+    GroupStreamElements<Types::VType, O_ELEMS> v_stream(v_elems.out);
 
-    // Derive the single element accumulator datatype
-    using AType = MACInfo<Shapes::QKDim, Types::QType, Types::KType>::AccType;
-
-    // Derive new type configuration of grouped streams
-    using GroupedTypes = attention::Types<
-        /*QType_=*/ap_uint<Types::QType::width * Shapes::QKDim / EF>,
-        /*KType_=*/ap_uint<Types::KType::width * Shapes::QKDim / EF>,
-        /*VType_=*/ap_uint<Types::VType::width * Shapes::VDim / EF>,
-        /*AType_=*/ap_uint<Types::AType::width * Shapes::KVLen / TF>
-    >;
-
-    // Feed the attention operator with folded streams
-    ScaledDotProductAttention<EF, TF, Shapes, GroupedTypes> attention(
-        q_stream.out, k_stream.out, v_stream.out
-    );
+    // Configure scaled dot-product attention to do type-casting pass-through
+    // activation matmul operations.
+    //  Note: This is not really a practically relevant example, but it is easy
+    //  to simulate without knowledge of real model parameters and quantization.
+    SDP<
+        /*QKDim=*/Shapes::QKDim,
+        /*QLen=*/Shapes::QLen,
+        /*VDim=*/Shapes::VDim,
+        /*KVLen=*/Shapes::KVLen,
+        /*EmbFold=*/EmbFold,
+        /*SeqFold=*/SeqFold,
+        /*QType=*/Types::QType,
+        /*KType=*/Types::KType,
+        /*VType=*/Types::VType,
+        /*MType=*/Types::AType, // Dummy
+        /*AType=*/Types::AType,
+        /*OType=*/Types::OType,
+        /*AccQKMatMul=*/Types::AType,
+        /*OutQKMatMul=*/Types::AType,
+        /*ActQKMatMul=*/PassThroughActivation<Types::AType>,
+        /*AccAVMatMul=*/Types::OType,
+        /*OutAVMatMul=*/Types::OType,
+        /*ActAVMatMul=*/PassThroughActivation<Types::OType>,
+        /*ActASoftmax=*/PassThroughActivation<Types::OType>
+    > attention(q_stream.out, k_stream.out, v_stream.out);
 
     // Collect and compare results
     BOOST_CHECK(all_equal(ground_truth.out, attention.out));

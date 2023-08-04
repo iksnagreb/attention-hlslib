@@ -189,4 +189,203 @@ template<unsigned EF, unsigned TF, class Shapes, class Types>
         // TODO: Add constructor overloads handling masked attention
     };
 
+// WIP: Refactoring of the attention operator interface
+template<
+    // Embedding dimension of queries and keys
+    std::size_t QKDim,
+    // Length of the query sequence
+    std::size_t QLen,
+    // Embedding dimension of the values
+    std::size_t VDim,
+    // Length of the key and value sequence
+    std::size_t KVLen,
+
+    // Folding along the embedding dimensions
+    std::size_t EmbFold,
+    // Folding along the sequence dimensions
+    std::size_t SeqFold,
+
+    // Datatype of query matrix elements
+    class QType,
+    // Datatype of key matrix elements
+    class KType,
+    // Datatype of value matrix elements
+    class VType,
+    // Datatype of mask matrix elements
+    class MType,
+    // Datatype of attention weights elements
+    class AType,
+    // Datatype of output elements
+    class OType,
+
+    // Datatype of accumulator elements of the Query x Key multiplication
+    class AccQKMatMul = typename MACInfo<QKDim, QType, KType>::AccType,
+    // Datatype of output elements of the Query x Key multiplication
+    class OutQKMatMul = typename MACInfo<QKDim, QType, KType>::AccType,
+    // Activation function type of the Query x Key multiplication
+    class ActQKMatMul = PassThroughActivation<AccQKMatMul>,
+
+    // Datatype of accumulator elements of the Attention x Value multiplication
+    class AccAVMatMul = typename MACInfo<KVLen, AType, VType>::AccType,
+    // Datatype of output elements of the Attention x Value multiplication
+    class OutAVMatMul = typename MACInfo<KVLen, AType, VType>::AccType,
+    // Activation function type of the Attention x Value multiplication
+    class ActAVMatMul = PassThroughActivation<AccAVMatMul>,
+
+    // Activation function type of the softmax normalization of the attention
+    // weights
+    class ActASoftmax = PassThroughActivation<OutQKMatMul>
+>
+    struct SDP {
+        // Tests whether the given folding is a valid configuration with respect
+        // to the shape configuration
+        static constexpr bool is_valid_folding =
+            // All shapes must be multiples of their corresponding fold
+            !(QKDim % EmbFold) && !(VDim % EmbFold) && !(KVLen % SeqFold);
+        // Stop compiling if the folding is invalid
+        static_assert(is_valid_folding, "Invalid Folding");
+
+        // Derive the input (I_ELEMS) and output (O_ELEMS) parallelism from
+        // the new embedding-fold concept
+        static constexpr std::size_t I_ELEMS = QKDim / EmbFold;
+        static constexpr std::size_t O_ELEMS = VDim / EmbFold;
+
+        // Parallel elements along sequence dimensions according to the new
+        // sequence-fold concept
+        static constexpr std::size_t S_ELEMS = KVLen / SeqFold;
+
+        // Key matrix stream tiling: Keys arrive in column-major order and tiles
+        // are required in column-major order for multiplication as well.
+        using KTiler = Col2ColStreamTiler<
+            // Note: Embeddings along columns, Sequence along rows
+            KType, EmbFold, SeqFold, I_ELEMS, S_ELEMS
+        >;
+
+        // Value matrix stream tiling: Values arrive in row-major order but
+        // tiles are required in column-major order for multiplication.
+        using VTiler = Row2ColStreamTiler<
+            // Note: Sequence along columns, Embeddings along rows
+            VType, SeqFold, EmbFold, O_ELEMS, S_ELEMS
+        >;
+
+        // MatMul instance configured to do the Query x Key multiplication
+        using QKMatMul = MatMul<
+            // Size configuration of the matmul operator, i.e. expected number
+            // of inputs (tiles) and number of elements to process in parallel.
+            //  Note: Embeddings along columns, Sequence along rows, mathing the
+            //  KTiler output
+            EmbFold, SeqFold, I_ELEMS, S_ELEMS,
+            // Input and output types configuration just as above, no matmul
+            // types are inferred here, everything can be specified above.
+            //  Note: These are elementwise types. Accumulators, outputs and
+            //  activations can (and should be) different from the AVMatMul.
+            QType, KType, AccQKMatMul, OutQKMatMul, ActQKMatMul
+        >;
+
+        // MatMul instance configured to do the Attention x Value multiplication
+        using AVMatMul = MatMul<
+            // Size configuration of the matmul operator, i.e. expected number
+            // of inputs (tiles) and number of elements to process in parallel.
+            //  Note: Sequence along columns, Embeddings along rows, mathing the
+            //  VTiler output
+            SeqFold, EmbFold, S_ELEMS, O_ELEMS,
+            // Input and output types configuration just as above, no matmul
+            // types are inferred here, everything can be specified above.
+            //  Note: These are elementwise types. Accumulators, outputs and
+            //  activations can (and should be) different from the QKMatMul.
+            AType, VType, AccAVMatMul, OutAVMatMul, ActAVMatMul
+        >;
+
+        // Short names for Input/Output/Internal streams of parallel elements:
+        //  Inputs are I_ELEMS groups along the embedding dimensions, outputs
+        //  are O_ELEMS groups along embedding dimensions as well.
+        //
+        //  The mask (might be an input) and the attention weights (produced
+        //  internally) are processed in S_ELEMS groups along one of the
+        //  sequence dimensions (i.e. th KVLen dimension).
+        using QStream = hls::stream<ap_uint<QType::width * I_ELEMS>>;
+        using KStream = hls::stream<ap_uint<KType::width * I_ELEMS>>;
+        using VStream = hls::stream<ap_uint<VType::width * O_ELEMS>>;
+        using MStream = hls::stream<ap_uint<MType::width * S_ELEMS>>;
+        using AStream = hls::stream<ap_uint<AType::width * S_ELEMS>>;
+        using OStream = hls::stream<ap_uint<OType::width * O_ELEMS>>;
+
+        // Instance objects of the Query-Key and Attention-Value matmul as
+        // configured above: These might have activation functions requiring
+        // parameters to be initialized once at construction/compile time and
+        // thus cannot be instantiated within the operator function call.
+        QKMatMul qk_matmul;
+        AVMatMul av_matmul;
+
+        // Output stream instance currently used with the "constructor-call"
+        // interface style.
+        //  TODO: Maybe switch to the function-call operator style, see new
+        //   matmul.
+        OStream out;
+
+        // Constructor-call style interface of the attention operator: Connects
+        // to the three input streams at operator instantiation and fills the
+        // internal, instance output stream.
+        //  TODO: This interface style cannot really be used when there are
+        //   static parameters (like weights and thresholds) which need to be
+        //   set at construction/compile time, which is what constructors are
+        //   actually for...
+        SDP(QStream &q, KStream &k, VStream &v) {
+// Allow functions and loops to overlap in the following
+#pragma HLS dataflow
+
+            // Tiling of the streamed key matrix
+            KTiler k_tiles(k, QLen);
+            // Tiling of the streamed value matrix
+            VTiler v_tiles(v, QLen);
+// Set depth of the output stream to fit the entire output length
+#pragma HLS stream variable=k_tiles.out depth=QLen * SeqFold * EmbFold
+// Set depth of the output stream to fit the entire output length
+#pragma HLS stream variable=v_tiles.out depth=QLen * SeqFold * EmbFold
+
+            // Multiply the query to the tiled key stream feeding some internal
+            // stream connecting to the attention-weights normalization softmax.
+            typename QKMatMul::OutStream qk_out;
+            qk_matmul(q, k_tiles.out, qk_out, QLen);
+// Set depth of the output stream to fit the entire output length
+#pragma HLS stream variable=qk_out depth=QLen * SeqFold
+
+            // Width of the attention weights (input and output) required to
+            // compute dummy scale-factors
+            constexpr auto IWidth = OutQKMatMul::width;
+            constexpr auto OWidth = AType::width;
+
+            // Compute input and output scale-factors such that softmax covers
+            // the input and output range of 0.0 to 1.0 mapped to 0 to 2^Width.
+            //  TODO: These should be properly specified from the outside
+            //   according to actual ranges and quantization parameters...
+            //  TODO: Something weird is going on with confusing IWidth and
+            //   OWidth and their corresponding scales...
+            auto oscale = 1.0f / ((ap_uint<IWidth + 1>{1} << IWidth) - 1);
+            auto iscale = 1.0f / ((ap_uint<OWidth + 1>{1} << OWidth) - 1);
+
+            // Instance object of the softmax normalization function: Currently
+            // this is the parameter-less, constructor style interface, which
+            // soon needs to be adapted to a function-call operator style to use
+            // the constructor for initializing the not-yet-implemented softmax
+            // output activation (ActSoftmax template argument).
+            //  TODO: Move upwards to be an actual instance object of the
+            //   attention operator with compile-time initialized parameters...
+            //  TODO: The interface does currently not match the element-wise
+            //   type specification style of the tiler and matmul operators...
+            Softmax<SeqFold, S_ELEMS, ap_uint<AType::width * S_ELEMS>> softmax(
+                qk_out, iscale, oscale, /*bias=*/0.0f, QLen
+            );
+// Set depth of the output stream to fit the entire output length
+#pragma HLS stream variable=softmax.out depth=QLen * SeqFold
+
+            // Multiply the normalized attention weights to the tiled value
+            // stream directly feeding the output stream.
+            av_matmul(softmax.out, v_tiles.out, out, QLen);
+// Set depth of the output stream to fit the entire output length
+#pragma HLS stream variable=out depth=QLen * EmbFold
+        }
+
+    };
+
 #endif // ATTENTION_HPP
