@@ -195,7 +195,7 @@ template<
         // have scales and an activation function requiring parameters to be
         // initialized once at construction/compile time and thus cannot be
         // instantiated within the operator function call.
-        Softmax<SeqFold, S_ELEMS, OutQKMatMul, AType> softmax;
+        Softmax<SeqFold, S_ELEMS, OutQKMatMul, AType, ActASoftmax> softmax;
 
         // Output stream instance currently used with the "constructor-call"
         // interface style.

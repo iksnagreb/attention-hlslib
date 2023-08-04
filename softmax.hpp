@@ -196,9 +196,11 @@ template<
                 for(std::size_t pe = 0; pe < GroupSize; ++pe) {
                     // Read next element into the buffer and scale to cover
                     // the right output range
-                    buffer[pe] = std::round(activation.activate(
-                        i % rep, pe, (weights.read() - obias) / oscale
-                    ));
+                    buffer[pe] = activation.activate(
+                        i % rep, pe, std::round(
+                            (weights.read() - obias) / oscale
+                        )
+                    );
                     // With the last pe element, the buffer is ready to be
                     // sent into the stream
                     if(pe == (GroupSize - 1)) {
