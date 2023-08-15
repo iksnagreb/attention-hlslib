@@ -67,7 +67,7 @@ BOOST_AUTO_TEST_CASE(test_scaled_dot_product_attention_no_mask) {
     // activation matmul operations.
     //  Note: This is not really a practically relevant example, but it is easy
     //  to simulate without knowledge of real model parameters and quantization.
-    ScaledDotProductAttention<
+    using Attention = ScaledDotProductAttention<
         /*QKDim=*/Shapes::QKDim,
         /*QLen=*/Shapes::QLen,
         /*VDim=*/Shapes::VDim,
@@ -87,10 +87,16 @@ BOOST_AUTO_TEST_CASE(test_scaled_dot_product_attention_no_mask) {
         /*OutAVMatMul=*/Types::OType,
         /*ActAVMatMul=*/PassThroughActivation<Types::OType>,
         /*ActASoftmax=*/PassThroughActivation<Types::OType>
-    > attention(q_stream.out, k_stream.out, v_stream.out);
+    >;
+    // Instance of the attention operator
+    Attention attention;
+    // Output stream to be filled by the attention operator
+    Attention::OStream attention_out;
+    // Apply the attention operator to the input streams
+    attention(q_stream.out, k_stream.out, v_stream.out, attention_out);
 
     // Collect and compare results
-    BOOST_CHECK(all_equal(ground_truth.out, attention.out));
+    BOOST_CHECK(all_equal(ground_truth.out, attention_out));
 
     // Check whether all elementwise streams have been consumed completely
     BOOST_CHECK(q_elems.out.empty());

@@ -188,6 +188,7 @@ template<
         // configured above: These might have activation functions requiring
         // parameters to be initialized once at construction/compile time and
         // thus cannot be instantiated within the operator function call.
+        //  TODO: Relies on default construction of the MatMul?
         QKMatMul qk_matmul;
         AVMatMul av_matmul;
 
@@ -195,22 +196,13 @@ template<
         // have scales and an activation function requiring parameters to be
         // initialized once at construction/compile time and thus cannot be
         // instantiated within the operator function call.
+        //  TODO: Relies on default construction of the Softmax?
         Softmax<SeqFold, S_ELEMS, OutQKMatMul, AType, ActASoftmax> softmax;
-
-        // Output stream instance currently used with the "constructor-call"
-        // interface style.
-        //  TODO: Maybe switch to the function-call operator style, see new
-        //   matmul.
-        OStream out;
 
         // Constructor-call style interface of the attention operator: Connects
         // to the three input streams at operator instantiation and fills the
         // internal, instance output stream.
-        //  TODO: This interface style cannot really be used when there are
-        //   static parameters (like weights and thresholds) which need to be
-        //   set at construction/compile time, which is what constructors are
-        //   actually for...
-        ScaledDotProductAttention(QStream &q, KStream &k, VStream &v) {
+        void operator()(QStream &q, KStream &k, VStream &v, OStream &out) {
 // Allow functions and loops to overlap in the following
 #pragma HLS dataflow
 
