@@ -50,11 +50,8 @@ template<
         // Datatype of the value input stream elements
         using VType = VType_;
 
-        // TODO: Add attention weights and output types?
-
         // Datatype of the attention weights stream elements
         using AType = AType_;
-
         // Datatype of the output
         using OType = OType_;
 
@@ -188,7 +185,6 @@ template<
         // configured above: These might have activation functions requiring
         // parameters to be initialized once at construction/compile time and
         // thus cannot be instantiated within the operator function call.
-        //  TODO: Relies on default construction of the MatMul?
         QKMatMul qk_matmul;
         AVMatMul av_matmul;
 
@@ -196,7 +192,6 @@ template<
         // have scales and an activation function requiring parameters to be
         // initialized once at construction/compile time and thus cannot be
         // instantiated within the operator function call.
-        //  TODO: Relies on default construction of the Softmax?
         Softmax<SeqFold, S_ELEMS, OutQKMatMul, AType, ActASoftmax> softmax;
 
         // Sets up the attention operator by initializing the activations
