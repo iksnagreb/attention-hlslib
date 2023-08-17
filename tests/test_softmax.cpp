@@ -45,7 +45,7 @@ BOOST_AUTO_TEST_CASE(test_softmax_simple) {
     // Instantiate a softmax normalization function with quantization scales
     // inferred above
     Softmax<N, /*PE=*/1, TestType, TestType> softmax {
-        qx.scale, qx.bias, qy.scale, qy.bias
+        {}, qx.scale, qx.bias, qy.scale, qy.bias
     };
 
     // Normalize all rows of the output matrix
@@ -94,7 +94,7 @@ BOOST_AUTO_TEST_CASE(test_softmax_grouped) {
     // Instantiate a softmax normalization function with quantization scales
     // inferred above
     Softmax<N / PE, /*PE=*/PE, TestType, TestType> softmax {
-        qx.scale, qx.bias, qy.scale, qy.bias
+        {}, qx.scale, qx.bias, qy.scale, qy.bias
     };
 
     // Normalize all rows of the output matrix

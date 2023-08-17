@@ -199,6 +199,22 @@ template<
         //  TODO: Relies on default construction of the Softmax?
         Softmax<SeqFold, S_ELEMS, OutQKMatMul, AType, ActASoftmax> softmax;
 
+        // Sets up the attention operator by initializing the activations
+        //  Note: Just passes the activation initializer to the matmul and
+        //  softmax constructors.
+        //  Note: For default-constructible activations this can resemble a
+        //  default constructor, i.e. no argument, as well.
+        explicit ScaledDotProductAttention(
+            const ActQKMatMul &act_qk_matmul = {},
+            const ActAVMatMul &act_av_matmul = {},
+            const ActASoftmax &act_a_softmax = {}
+        ) : qk_matmul{act_qk_matmul},
+            av_matmul{act_av_matmul},
+            // TODO: What about scales and biases?
+            softmax{act_a_softmax} {
+            // Nothing else to do here...
+        }
+
         // Constructor-call style interface of the attention operator: Connects
         // to the three input streams at operator instantiation and fills the
         // internal, instance output stream.

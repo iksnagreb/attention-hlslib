@@ -126,6 +126,10 @@ template<
     class Activation = PassThroughActivation<float>
 >
     struct Softmax {
+        // Activation function which potentially contains parameter: e.g.
+        // thresholds which need to be initialized at construction/compile time
+        Activation activation;
+
         // Input scale parameters for converting from integer to float
         // representation: Default such that softmax covers the input range of
         // 0.0 to 1.0 mapped to 0 to 2^Width
@@ -143,10 +147,6 @@ template<
         const float oscale =
             1.0f / ((ap_uint<OType::width + 1>{1} << OType::width) - 1);
         const float obias = 0.0;
-
-        // Activation function which potentially contains parameter: e.g.
-        // thresholds which need to be initialized at construction/compile time
-        Activation activation;
 
         // Short names to the input and output streams of parallel elements
         using IStream = hls::stream<ap_uint<GroupSize * IType::width>>;
