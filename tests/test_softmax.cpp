@@ -3,6 +3,9 @@
 
 #include <boost/test/unit_test.hpp>
 
+// Enable constexpr in vitis hlslib
+#define HLS_CONSTEXPR_ENABLE
+
 // Arbitrary precision integers, i.e. bit-vectors
 #include <ap_int.h>
 
@@ -83,8 +86,8 @@ BOOST_AUTO_TEST_CASE(test_softmax_grouped) {
     BOOST_CHECK(all_close(y, qy.dequantize(), qy.scale));
 
 //    // For debugging print scale parameters
-//    std::printf("z.scale=%4.4f, z.bias=%4.4f\n", z.scale, z.bias);
-//    std::printf("q.scale=%4.4f, q.bias=%4.4f\n", q.scale, q.bias);
+//    std::printf("qx.scale=%4.4f, qx.bias=%4.4f\n", qx.scale, qx.bias);
+//    std::printf("qy.scale=%4.4f, qy.bias=%4.4f\n", qy.scale, qy.bias);
 
     // Generate streams of the quantized matrices
     RowMajorMatrixStreamer<TestType> qx_elems(qx.z);

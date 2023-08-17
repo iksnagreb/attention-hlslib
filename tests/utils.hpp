@@ -32,19 +32,19 @@ template<class Type, std::size_t M, std::size_t N>
 
         // First level indexing operator of a const matrix. Returns the
         // second-level matrix by value, i.e. does not allow for modification.
-        std::array<Type, N> operator[] (std::size_t index) const {
+        std::array<Type, N> operator[](std::size_t index) const {
             return (*matrix)[index];
         }
 
         // First level indexing operator of a non-const matrix. Returns
         // reference to the second-level matrix allowing modification.
-        std::array<Type, N> & operator[] (std::size_t index) {
+        std::array<Type, N> &operator[](std::size_t index) {
             return (*matrix)[index];
         }
 
         // Copy-assignment operator (must be non-const as it modifies). Does not
         // reallocate memory, just copies all elements
-        Matrix & operator= (const Matrix &m) {
+        Matrix &operator=(const Matrix &m) {
             // Copy all elements of the nested array (relies on copy assignment
             // of std::array)
             *matrix = *(m.matrix);
@@ -508,8 +508,8 @@ template<int Width, std::size_t N>
         const std::array<ap_uint<Width>, N> &x,
         // Note: Assumes inputs and outputs to cover the whole range of 0.0 to
         // 1.0 mapped to the 0 to 2^Width - 1 integer range
-        const float iscale = 1.0f / ((ap_uint<Width+1>{1} << Width) - 1),
-        const float oscale = 1.0f / ((ap_uint<Width+1>{1} << Width) - 1),
+        const float iscale = 1.0f / ((ap_uint<Width + 1>{1} << Width) - 1),
+        const float oscale = 1.0f / ((ap_uint<Width + 1>{1} << Width) - 1),
         const float bias = 0.0) {
         // Allocate a result vector of the same size on the stack
         // @formatter:off
@@ -577,8 +577,8 @@ template<int Width, std::size_t M, std::size_t N>
         const Matrix<ap_uint<Width>, M, N> &xs,
         // Note: Assumes inputs and outputs to cover the whole range of 0.0 to
         // 1.0 mapped to the 0 to 2^Width - 1 integer range
-        const float iscale = 1.0f / ((ap_uint<Width+1>{1} << Width) - 1),
-        const float oscale = 1.0f / ((ap_uint<Width+1>{1} << Width) - 1),
+        const float iscale = 1.0f / ((ap_uint<Width + 1>{1} << Width) - 1),
+        const float oscale = 1.0f / ((ap_uint<Width + 1>{1} << Width) - 1),
         const float bias = 0.0) {
         // Allocate the matrix on the stack
         Matrix<ap_uint<Width>, M, N> ys;
@@ -649,6 +649,88 @@ template<std::size_t Width, std::size_t M, std::size_t N>
 template<class Type, std::size_t M, std::size_t N>
     auto quantize(const Matrix<float, M, N> &matrix) {
         return Quantized<Type::width, M, N>{matrix};
+    }
+
+// Gets the number of possible values of a datatype
+template<class Type>
+    constexpr std::size_t get_num_possible_values = 0;
+
+// Specialize for ap_uint types
+template<int Width>
+    constexpr std::size_t get_num_possible_values<ap_uint<Width>> =
+        ap_uint<Width + 1>{1} << Width;
+
+// Specialize for ap_int types
+template<int Width>
+    constexpr std::size_t get_num_possible_values<ap_int<Width>> =
+        ap_uint<Width + 1>{1} << Width;
+
+// Get the minimum value of a datatype
+template<class Type>
+    constexpr auto min = Type{0};
+
+// Get the maximum value of a datatype
+template<class Type>
+    constexpr auto max = Type{0};
+
+// Specialize the minimum value of ap_uint
+template<int Width>
+    constexpr auto min<ap_uint<Width>> = ap_uint<Width>{0};
+
+// Specialize the maximum value of ap_uint
+template<int Width>
+    constexpr auto max<ap_uint<Width>> = (ap_uint<Width + 1>{1} << Width) - 1;
+
+// Specialize the minimum value of ap_int
+template<int Width>
+    constexpr auto min<ap_int<Width>> = -(ap_int<Width + 1>{1} << (Width - 1));
+
+// Specialize the maximum value of ap_int
+template<int Width>
+    constexpr auto max<ap_int<Width>> =
+        (ap_int<Width + 1>{1} << (Width - 1)) - 1;
+
+// Get the minimum value of a dummy float
+template<>
+    constexpr auto min<float> = float{0.0};
+
+// Get the maximum value of a dummy float
+template<>
+    constexpr auto max<float> = float{1.0};
+
+// FINN HLSLIB activation functions: e.g. pass-through and thresholds
+#include <activations.hpp>
+
+// Generates quantized identity function thresholds activations of IType to
+// OType
+template<std::size_t NF, std::size_t PE, class IType, class OType>
+    auto make_identity_thresholds() {
+        // The number of thresholds is determined by the range of the output
+        // datatype
+        constexpr std::size_t steps = get_num_possible_values<OType> - 1;
+
+        // Range of input and output type values
+        auto irange = float((max<IType> - min<IType>));
+        auto orange = float((max<OType> - min<OType>));
+        // The scale, or step size, is determined by the ratio between input
+        // and output range
+        auto scale = irange / orange;
+
+        // Create a thresholds activation function instance
+        ThresholdsActivation<NF, PE, steps, IType, OType> thresholds;
+
+        // Iterate all three dimensions of the thresholds: Thresholds are folded
+        for(std::size_t nf = 0; nf < NF; ++nf) {
+            for(std::size_t pe = 0; pe < PE; ++pe) {
+                for(std::size_t i = 0; i < steps; ++i) {
+                    thresholds.m_thresholds[pe][nf][i] =
+                        scale * float(i) + min<IType>;
+                }
+            }
+        }
+
+        // Return the prepared thresholds activation function
+        return thresholds;
     }
 
 #endif //ATTENTION_HLSLIB_UTILS_HPP
