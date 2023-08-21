@@ -53,7 +53,7 @@ using Attention = ScaledDotProductAttention<
     /*AccAVMatMul=*/Types::OType,
     /*OutAVMatMul=*/Types::OType,
     /*ActAVMatMul=*/PassThroughActivation<Types::OType>,
-    /*ActASoftmax=*/PassThroughActivation<Types::OType>
+    /*ActASoftmax=*/PassThroughActivation<float>
 >;
 
 // Short type aliases for matrix types

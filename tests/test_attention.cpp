@@ -86,7 +86,7 @@ BOOST_AUTO_TEST_CASE(test_scaled_dot_product_attention_no_mask) {
         /*AccAVMatMul=*/Types::OType,
         /*OutAVMatMul=*/Types::OType,
         /*ActAVMatMul=*/PassThroughActivation<Types::OType>,
-        /*ActASoftmax=*/PassThroughActivation<Types::OType>
+        /*ActASoftmax=*/PassThroughActivation<float>
     >;
     // Instance of the attention operator
     Attention attention;

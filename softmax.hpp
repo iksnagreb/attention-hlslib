@@ -145,7 +145,7 @@ template<
         //  TODO: These should be properly specified from the outside
         //   cording to actual ranges and quantization parameters...
         const float oscale =
-            1.0f;
+            1.0f / ((ap_uint<OType::width + 1>{1} << OType::width) - 1);
         const float obias = 0.0;
 
         // Short names to the input and output streams of parallel elements
