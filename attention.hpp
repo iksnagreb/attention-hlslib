@@ -234,7 +234,7 @@ template<
 #pragma HLS stream variable=qk_out depth=QLen * SeqFold
 
             // Normalize the attention weights via softmax feeding some internal
-            // stream connecting to the attention-weights matmul.
+            // stream connecting to the attention-values matmul.
             AStream softmax_out;
             softmax(qk_out, softmax_out, QLen);
 // Set depth of the output stream to fit the entire output length
