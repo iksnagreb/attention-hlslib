@@ -8,7 +8,7 @@
 
 // Configure shapes of the attention inputs for testing
 using Shapes = attention::Shapes<
-    /*QKDim_=*/4, /*QLen_=*/16, /*VDim_=*/8, /*KVLen_=*/24
+    /*QKDim_=*/32, /*QLen_=*/64, /*VDim_=*/32, /*KVLen_=*/64
 >;
 
 // Configure types to be used for attention tests
@@ -21,8 +21,8 @@ using Types = attention::Types<
 >;
 
 // Embedding fold and sequence fold to be used for testing attention
-static constexpr std::size_t EmbFold = 2;
-static constexpr std::size_t SeqFold = 8;
+static constexpr std::size_t EmbFold = 1;   // => SIMD = 32
+static constexpr std::size_t SeqFold = 64;  // => PE = 1
 
 // Derive the input (I_ELEMS) and output (O_ELEMS) parallelism from
 // the new embedding-fold concept

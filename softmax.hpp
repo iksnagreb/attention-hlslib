@@ -20,99 +20,8 @@
 // Flattening of buffers to bit vectors
 #include "flatten.hpp"
 
-// Streaming softmax heavily inspired by Xilinx finn-hlslib
-//  Note: This is basically the same as the one in Xilinx finn-hlslib, just with
-//      input scaling added before exp().
-//  Note: Takes an arbitrary input Type (convertible to float) and produces
-//      floating point outputs in range [0.0, 1.0].
-template<std::size_t Len, class Type>
-    void softmax(
-        hls::stream<Type> &in, hls::stream<float> &out, float scale = 1.0,
-        float bias = 0.0) {
-        // Track the maximum value and the number of maximal values for overflow
-        // handling
-        // @formatter:off
-        Type max_value; ap_uint<clog2(Len + 1)> max_count = 0;
-        // @formatter:on
-
-        // The normalizing loop needs both, the exp-value and the original value
-        // for overflow handling
-        // @formatter:off
-        struct Pair {
-            Type xi; float ex;
-        };
-        // @formatter:on
-
-        // Send data from first loop to the second loop via stream
-        hls::stream<Pair> buffer;
-// Buffer stream with depth to fit the entire input stream length
-#pragma HLS stream variable=buffer depth=Len
-
-        // Accumulate the sum of all exp(x) for normalizing in the second loop
-        float total = 0;
-
-        // Read the input stream of Len elements
-        for(std::size_t i = 0; i < Len; ++i) {
-// Pipeline the steps of this loop
-#pragma HLS pipeline II=1 style=flp
-            // Read the next input from the stream
-            const Type x = in.read();
-
-            // Keep track of the maximum value encountered
-            if(max_value < x || max_count == 0) {
-                // New maximum, occurred once
-                max_value = x;
-                max_count = 1;
-            } else if(max_value == x) {
-                // Got the old maximum again
-                max_count++;
-            }
-
-            // Convert to float, scale and compute exponential function
-            float ex = std::exp(scale * float(x) + bias);
-            // Accumulate for normalizing
-            total += ex;
-            // Send into the stream for next loop
-            buffer.write({x, ex});
-        }
-
-        // Detect overflow of the accumulator
-        const bool overflow = std::isinf(total);
-
-        // Read the buffered stream of the same length as the input stream
-        for(std::size_t i = 0; i < Len; ++i) {
-// Pipeline the steps of this loop
-#pragma HLS pipeline II=1 style=flp
-            // Read the intermediate, buffered pair
-            Pair x = buffer.read();
-
-            // Numerator and denominator of normalization quotient
-            float num, den;
-
-            // Overflow handling
-            if(overflow) {
-                // In case of an overflow, distribute equal weight to all
-                // occurrences of the maximum value, such that the weights still
-                // sum to one.
-                // @formatter:off
-                num = x.xi == max_value ? 1.0 : 0.0; den = max_count;
-                // @formatter:on
-            } else {
-                // In case of no overflow, normalize the exponential values by
-                // the accumulated total
-                // @formatter:off
-                num = x.ex; den = total;
-                // @formatter:on
-            }
-
-            // Normalize and send into output stream
-            out.write(num / den);
-        }
-    }
-
-// WIP: Refactoring softmax operator: Streaming softmax with GroupSize
-// parallelism handling (but not really in parallel, contains adapter
-// splitting and merging the PEs again).
+// Streaming softmax with GroupSize parallelism handling and task-level
+// parallelism
 template<
     // Number of input groups making up a complete feature map to be normalized
     std::size_t NumGroups,
@@ -155,56 +64,178 @@ template<
         // Receives repeated streams of not-normalized values and produces a
         // softmax normalized output stream
         void operator()(IStream &in, OStream &out, const std::size_t rep = 1) {
-            // TODO: Can the following be synthesized and pipelined? Parallelize
-            //  properly to get rid of the splitting, merging and data-width
-            //  conversions.
-            // TODO: Maybe integrate the softmax function above here and fuse
-            //  everything into a single pipelineable loop?
-// Allow functions and loops to overlap in the following
+// Use task-level pipelining in the following, allowing the loops to overlap
 #pragma HLS dataflow
-            // Stream of single elements
-            hls::stream<IType> elems;
-// Buffer stream with depth to fit the entire input stream length
-#pragma HLS stream variable=elems depth=rep * NumGroups * GroupSize
-            // Adapt the input stream of PE parallel elements to a single
-            // element stream.
-            // Operate as long as there are elements in the input stream
-            for(std::size_t i = 0; i < rep * NumGroups; ++i) {
-                // Read and slice next group from the input stream
-                auto buffer = Slice<IType>{}(in.read());
-                // Collect the next N elements into the buffer
-                for(std::size_t pe = 0; pe < GroupSize; ++pe) {
-                    // Write the next element into the intermediate stream
-                    elems.write(buffer(pe, 0));
+
+            // Total length oif the feature map
+            static constexpr std::size_t Len = NumGroups * GroupSize;
+
+            // Structure packing all state information which needs to be
+            // communicated from one loop to the other
+            struct StatePack {
+                // Maximum value per row, i.e., per feature map and the count of
+                // these values for overflow handling
+                // @formatter:off
+                IType max_value; ap_uint<clog2(Len + 1)> max_count = 0;
+                // @formatter:on
+
+                // The total over the exponentiated feature map, i.e., the sum
+                // of exp(x) along the row
+                float total = 0;
+
+                // Track whether there has been an overflow accumulating the
+                // total
+                bool overflow = false;
+            };
+
+            // Structure packing the elementwise input and intermediate stream
+            // connecting the two loops
+            struct ValuePack {
+                // Original input type elements as separate elements
+                IType ix[GroupSize];
+                // Elementwise floating point exponential of the inputs
+                float ex[GroupSize];
+            };
+
+            // State buffer between the two loops
+            hls::stream<StatePack> state_buffer;
+// This buffer needs to hold one state per repetition, i.e., per row
+#pragma HLS stream variable=state_buffer depth=rep
+
+            // Value buffer between the two loops
+            hls::stream<ValuePack> value_buffer;
+// This buffer needs to hold one value pack per group of elements
+#pragma HLS stream variable=value_buffer depth=rep * NumGroups
+
+            // Scope of the first loop to have simple short names for locals
+            {
+                // Local variables for building up state and values in the first
+                // loop iteration
+                StatePack state;
+                ValuePack value;
+
+                // Operate as long as there are elements in the input stream
+                sm_loop1: for(std::size_t i = 0; i < rep * NumGroups; ++i) {
+// Pipeline the steps of this loop
+#pragma HLS pipeline II=1 style=flp
+                    // Read and slice the next group from the input stream
+                    auto buffer = Slice<IType>{}(in.read());
+
+                    // Process the GroupSize elements in parallel
+                    for(std::size_t pe = 0; pe < GroupSize; ++pe) {
+// Inner loop should be unrolled
+#pragma HLS UNROLL
+                        // Input element to be processed
+                        const IType x = buffer(pe, 0);
+                        // Keep track of the maximum value encountered
+                        if(state.max_value < x || state.max_count == 0) {
+                            // New maximum, occurred once
+                            state.max_value = x;
+                            state.max_count = 1;
+                        } else if(state.max_value == x) {
+                            // Got the old maximum again
+                            state.max_count++;
+                        }
+                        // Convert to float, scale and compute exponential
+                        // function
+                        const float ex = std::exp(iscale * float(x) + ibias);
+                        // Accumulate the exponential for normalizing in the
+                        // second
+                        // loop
+                        state.total += ex;
+                        // Insert the elements oto the value pack
+                        value.ix[pe] = x;
+                        value.ex[pe] = ex;
+                    }
+
+                    // For each group, forward the value pack to the next loop
+                    // to continue processing
+                    value_buffer.write(value);
+                    // Forward the state at the end of each row, i.e., for each
+                    // completion of a feature map
+                    if(((i + 1) % NumGroups) == 0) {
+                        // Do the overflow checking before handing over to the
+                        // next loop
+                        state.overflow = std::isinf(state.total);
+                        // Send state to be consumed by the next loop
+                        state_buffer.write(state);
+                        // Reset the maximum tracking
+                        state.max_count = 0;
+                        // Reset the accumulator
+                        state.total = 0;
+                    }
                 }
             }
 
-            // Softmax weight stream in floating-point representation
-            hls::stream<float> weights;
-// Buffer stream with depth to fit the entire input stream length
-#pragma HLS stream variable=weights depth=rep * NumGroups * GroupSize
-            // Repeatedly apply softmax to the elementwise stream
-            for(std::size_t i = 0; i < rep; ++i) {
-                softmax<NumGroups * GroupSize>(elems, weights, iscale, ibias);
-            }
+            // Scope of the second loop to have simple short names for locals
+            {
+                // Local variables for holding state and values during the
+                // loop iteration
+                StatePack state;
+                ValuePack value;
 
-            // Buffer collecting GroupSize elements
-            OType buffer[GroupSize];
-            // Operate as long as there are elements in the input stream
-            for(std::size_t i = 0; i < rep * NumGroups; ++i) {
-                // Collect the next GroupSize elements into the buffer
-                for(std::size_t pe = 0; pe < GroupSize; ++pe) {
-                    // Read next element into the buffer and scale to cover
-                    // the right output range
-                    buffer[pe] = std::round((activation.activate(
-                        i % NumGroups, pe, weights.read()) - obias) / oscale
-                    );
-                    // With the last pe element, the buffer is ready to be
-                    // sent into the stream
-                    if(pe == (GroupSize - 1)) {
-                        // Feed the output stream with flattened buffer
-                        out.write(flatten<GroupSize>(buffer));
+                // Denominator shared by whole feature map
+                float den;
+
+                // Operate as long as there are elements in the input stream
+                sm_loop2: for(std::size_t i = 0; i < rep * NumGroups; ++i) {
+// Pipeline the steps of this loop
+#pragma HLS pipeline II=1 style=flp
+                    // Receive new state at the start of a row, i.e., for each
+                    // new feature map
+                    if((i % NumGroups) == 0) {
+                        // Receive state from connecting buffer
+                        state = state_buffer.read();
+                        // Update the denominator, which is shared across the
+                        // whole feature map
+                        // by default, normalize by the total
+                        den = float(state.total);
+                        // If there was an overflow, use the count of maximal
+                        // values instead
+                        if(state.overflow) {
+                            den = float(state.max_count);
+                        }
                     }
+
+                    // Receive the next group of values form the intermediate
+                    // buffer
+                    value = value_buffer.read();
+
+                    // Buffer collecting GroupSize elements
+                    OType buffer[GroupSize];
+
+                    // Process the GroupSize elements in parallel
+                    for(std::size_t pe = 0; pe < GroupSize; ++pe) {
+// Inner loop should be unrolled
+#pragma HLS UNROLL
+                        // Numerator and denominator for normalizing
+                        float num;
+
+                        // Overflow handling
+                        if(state.overflow) {
+                            // In case of an overflow, distribute equal weight
+                            // to all occurrences of the maximum value, such
+                            // that the weights still sum to one.
+                            // @formatter:off
+                            num = value.ix[pe] == state.max_value ? 1.0 : 0.0;
+                            // @formatter:on
+                        } else {
+                            // In case of no overflow, normalize the exponential
+                            // values by the accumulated total
+                            // @formatter:off
+                            num = value.ex[pe];
+                            // @formatter:on
+                        }
+
+                        // Read next element into the buffer and scale to cover
+                        // the right output range
+                        buffer[pe] = std::round((activation.activate(
+                            i % NumGroups, pe, num / den) - obias) / oscale
+                        );
+                    }
+
+                    // Feed the output stream with flattened buffer
+                    out.write(flatten<GroupSize>(buffer));
                 }
             }
         }
