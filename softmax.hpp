@@ -70,6 +70,19 @@ template<
             // Total length oif the feature map
             static constexpr std::size_t Len = NumGroups * GroupSize;
 
+            // Type used to convert exponentiated elements to integers for
+            // accumulation
+            using ZType = ap_uint<24>;
+
+            // Maximum possible value of input elements
+            IType max_x = (IType{1} << IType::width) - 1;
+            // Maximum possible value of intermediate elements
+            ZType max_z = (ZType{1} << ZType::width) - 1;
+            // Maximum possible value of exponential of the input elements
+            float max_e = std::exp(iscale * max_x + ibias);
+            // Scale factor to convert from float to the intermediate format
+            float scale = (float)max_z / max_e;
+
             // Structure packing all state information which needs to be
             // communicated from one loop to the other
             struct StatePack {
@@ -114,8 +127,13 @@ template<
                 StatePack state;
                 ValuePack value;
 
+                // Integer accumulator to fit Len additions of the ZType
+                // intermediates
+                ap_uint<ZType::width + Len> accumulator = 0;
+
                 // Operate as long as there are elements in the input stream
-                sm_loop1: for(std::size_t i = 0; i < rep * NumGroups; ++i) {
+                sm_loop1:
+                for(std::size_t i = 0; i < rep * NumGroups; ++i) {
 // Pipeline the steps of this loop
 #pragma HLS pipeline II=1 style=flp
                     // Read and slice the next group from the input stream
@@ -140,10 +158,10 @@ template<
                         // function
                         const float ex = std::exp(iscale * float(x) + ibias);
                         // Accumulate the exponential for normalizing in the
-                        // second
-                        // loop
-                        state.total += ex;
-                        // Insert the elements oto the value pack
+                        // second loop: Convert from float to integer to
+                        // optimize latency
+                        accumulator += (ZType)(ex * scale);
+                        // Insert the elements into the value pack
                         value.ix[pe] = x;
                         value.ex[pe] = ex;
                     }
@@ -154,6 +172,8 @@ template<
                     // Forward the state at the end of each row, i.e., for each
                     // completion of a feature map
                     if(((i + 1) % NumGroups) == 0) {
+                        // Convert the accumulator back to float
+                        state.total = float(accumulator) / scale;
                         // Do the overflow checking before handing over to the
                         // next loop
                         state.overflow = std::isinf(state.total);
@@ -162,7 +182,7 @@ template<
                         // Reset the maximum tracking
                         state.max_count = 0;
                         // Reset the accumulator
-                        state.total = 0;
+                        accumulator = 0;
                     }
                 }
             }
@@ -178,7 +198,8 @@ template<
                 float den;
 
                 // Operate as long as there are elements in the input stream
-                sm_loop2: for(std::size_t i = 0; i < rep * NumGroups; ++i) {
+                sm_loop2:
+                for(std::size_t i = 0; i < rep * NumGroups; ++i) {
 // Pipeline the steps of this loop
 #pragma HLS pipeline II=1 style=flp
                     // Receive new state at the start of a row, i.e., for each
@@ -187,8 +208,7 @@ template<
                         // Receive state from connecting buffer
                         state = state_buffer.read();
                         // Update the denominator, which is shared across the
-                        // whole feature map
-                        // by default, normalize by the total
+                        // whole feature map by default, normalize by the total
                         den = float(state.total);
                         // If there was an overflow, use the count of maximal
                         // values instead
@@ -208,7 +228,7 @@ template<
                     for(std::size_t pe = 0; pe < GroupSize; ++pe) {
 // Inner loop should be unrolled
 #pragma HLS UNROLL
-                        // Numerator and denominator for normalizing
+                        // Numerator to be normalized
                         float num;
 
                         // Overflow handling
@@ -216,15 +236,11 @@ template<
                             // In case of an overflow, distribute equal weight
                             // to all occurrences of the maximum value, such
                             // that the weights still sum to one.
-                            // @formatter:off
                             num = value.ix[pe] == state.max_value ? 1.0 : 0.0;
-                            // @formatter:on
                         } else {
                             // In case of no overflow, normalize the exponential
                             // values by the accumulated total
-                            // @formatter:off
                             num = value.ex[pe];
-                            // @formatter:on
                         }
 
                         // Read next element into the buffer and scale to cover
