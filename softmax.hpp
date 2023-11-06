@@ -61,15 +61,14 @@ template<
         using IStream = hls::stream<ap_uint<GroupSize * IType::width>>;
         using OStream = hls::stream<ap_uint<GroupSize * OType::width>>;
 
+        // Total length of the feature map
+        static constexpr std::size_t Len = NumGroups * GroupSize;
+
         // Receives repeated streams of not-normalized values and produces a
         // softmax normalized output stream
         void operator()(IStream &in, OStream &out, const std::size_t rep = 1) {
 // Use task-level pipelining in the following, allowing the loops to overlap
 #pragma HLS dataflow
-
-            // Total length oif the feature map
-            static constexpr std::size_t Len = NumGroups * GroupSize;
-
             // Type used to convert exponentiated elements to integers for
             // accumulation
             //  Note: 24 bits is a kind of arbitrary choice...
@@ -116,6 +115,7 @@ template<
             // State buffer between the two loops
             hls::stream<StatePack> state_buffer;
 // This buffer needs to hold one state per repetition, i.e., per row
+//  TODO: Referring to a function argument does probably not work...
 #pragma HLS stream variable=state_buffer depth=rep
 
             // Value buffer between the two loops
@@ -211,6 +211,8 @@ template<
                         state = state_buffer.read();
                         // Update the denominator, which is shared across the
                         // whole feature map by default, normalize by the total
+                        //  Note: Vitis reports "unsafe type casting from type
+                        //  'size_t' to type 'float'" here, but why?
                         den = float(state.total) / scale;
                         // If there was an overflow, use the count of maximal
                         // values instead
