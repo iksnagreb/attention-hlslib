@@ -72,6 +72,7 @@ template<
 
             // Type used to convert exponentiated elements to integers for
             // accumulation
+            //  Note: 24 bits is a kind of arbitrary choice...
             using ZType = ap_uint<24>;
 
             // Maximum possible value of input elements
@@ -93,8 +94,10 @@ template<
                 // @formatter:on
 
                 // The total over the exponentiated feature map, i.e., the sum
-                // of exp(x) along the row
-                float total = 0;
+                // of exp(x) along the row computed in integer arithmetic
+                //  Note: Needs to fit Len additions of ZType::width sized
+                //  elements + 1 overflow bit
+                ap_uint<ZType::width + Len + 1> total = 0;
 
                 // Track whether there has been an overflow accumulating the
                 // total
@@ -127,10 +130,6 @@ template<
                 StatePack state;
                 ValuePack value;
 
-                // Integer accumulator to fit Len additions of the ZType
-                // intermediates
-                ap_uint<ZType::width + Len> accumulator = 0;
-
                 // Operate as long as there are elements in the input stream
                 sm_loop1:
                 for(std::size_t i = 0; i < rep * NumGroups; ++i) {
@@ -160,7 +159,13 @@ template<
                         // Accumulate the exponential for normalizing in the
                         // second loop: Convert from float to integer to
                         // optimize latency
-                        accumulator += (ZType)(ex * scale);
+                        state.total += (ZType)(ex * scale);
+
+                        // Detect overflow by checking the highest bit
+                        if(state.total.test(ZType::width + Len)) {
+                            state.overflow = true;
+                        }
+
                         // Insert the elements into the value pack
                         value.ix[pe] = x;
                         value.ex[pe] = ex;
@@ -172,17 +177,14 @@ template<
                     // Forward the state at the end of each row, i.e., for each
                     // completion of a feature map
                     if(((i + 1) % NumGroups) == 0) {
-                        // Convert the accumulator back to float
-                        state.total = float(accumulator) / scale;
-                        // Do the overflow checking before handing over to the
-                        // next loop
-                        state.overflow = std::isinf(state.total);
                         // Send state to be consumed by the next loop
                         state_buffer.write(state);
                         // Reset the maximum tracking
                         state.max_count = 0;
                         // Reset the accumulator
-                        accumulator = 0;
+                        state.total = 0;
+                        // Reset the overflow state
+                        state.overflow = false;
                     }
                 }
             }
@@ -209,7 +211,7 @@ template<
                         state = state_buffer.read();
                         // Update the denominator, which is shared across the
                         // whole feature map by default, normalize by the total
-                        den = float(state.total);
+                        den = float(state.total) / scale;
                         // If there was an overflow, use the count of maximal
                         // values instead
                         if(state.overflow) {
