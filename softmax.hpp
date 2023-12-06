@@ -39,23 +39,13 @@ template<
         // thresholds which need to be initialized at construction/compile time
         Activation activation;
 
-        // Input scale parameters for converting from integer to float
-        // representation: Default such that softmax covers the input range of
-        // 0.0 to 1.0 mapped to 0 to 2^Width
-        //  TODO: These should be properly specified from the outside
-        //   cording to actual ranges and quantization parameters...
-        const float iscale =
-            1.0f / ((ap_uint<IType::width + 1>{1} << IType::width) - 1);
-        const float ibias = 0.0;
+        // Dequantizer input scale factor for converting from integer to float
+        // representation.
+        //  Note: No dequantizer bias necessary as softmax is shift invariant
+        const float dequant = 1.0;
 
-        // Output scale parameters for converting from float to integer
-        // representation: Default such that softmax covers the output range of
-        // 0.0 to 1.0 mapped to 0 to 2^Width
-        //  TODO: These should be properly specified from the outside
-        //   cording to actual ranges and quantization parameters...
-        const float oscale =
-            1.0f / ((ap_uint<OType::width + 1>{1} << OType::width) - 1);
-        const float obias = 0.0;
+//        Softmax(Activation activation, float dequant)
+//         : activation{activation}, iscale{iscale} {}
 
         // Short names to the input and output streams of parallel elements
         using IStream = hls::stream<ap_uint<GroupSize * IType::width>>;
@@ -79,7 +69,7 @@ template<
             // Maximum possible value of intermediate elements
             ZType max_z = (ZType{1} << ZType::width) - 1;
             // Maximum possible value of exponential of the input elements
-            float max_e = std::exp(iscale * max_x + ibias);
+            float max_e = std::exp(dequant * max_x);
             // Scale factor to convert from float to the intermediate format
             float scale = (float)max_z / max_e;
 
@@ -155,7 +145,7 @@ template<
                         }
                         // Convert to float, scale and compute exponential
                         // function
-                        const float ex = std::exp(iscale * float(x) + ibias);
+                        const float ex = std::exp(dequant * float(x));
                         // Accumulate the exponential for normalizing in the
                         // second loop: Convert from float to integer to
                         // optimize latency
@@ -249,8 +239,8 @@ template<
 
                         // Read next element into the buffer and scale to cover
                         // the right output range
-                        buffer[pe] = std::round((activation.activate(
-                            i % NumGroups, pe, num / den) - obias) / oscale
+                        buffer[pe] = activation.activate(
+                            i % NumGroups, pe, num / den
                         );
                     }
 

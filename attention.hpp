@@ -198,15 +198,15 @@ template<
         //  Note: Just passes the activation initializer to the matmul and
         //  softmax constructors.
         //  Note: For default-constructible activations this can resemble a
-        //  default constructor, i.e. no argument, as well.
+        //  default constructor, i.e. no argument as well.
         explicit ScaledDotProductAttention(
             const ActQKMatMul &act_qk_matmul = {},
             const ActAVMatMul &act_av_matmul = {},
-            const ActASoftmax &act_a_softmax = {}
+            const ActASoftmax &act_a_softmax = {},
+            const float dequant_softmax = 1.0
         ) : qk_matmul{act_qk_matmul},
             av_matmul{act_av_matmul},
-            // TODO: What about scales and biases?
-            softmax{act_a_softmax} {
+            softmax{act_a_softmax, dequant_softmax} {
             // Nothing else to do here...
         }
 
