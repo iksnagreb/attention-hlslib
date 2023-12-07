@@ -34,6 +34,7 @@ static constexpr std::size_t SeqFold = 8;
 static constexpr std::size_t I_ELEMS = Shapes::QKDim / EmbFold;
 static constexpr std::size_t O_ELEMS = Shapes::VDim / EmbFold;
 
+
 // Tests scaled dot-product attention without mask
 BOOST_AUTO_TEST_CASE(test_scaled_dot_product_attention_no_mask) {
     // Generate random query, key and value matrices
@@ -86,10 +87,17 @@ BOOST_AUTO_TEST_CASE(test_scaled_dot_product_attention_no_mask) {
         /*AccAVMatMul=*/Types::OType,
         /*OutAVMatMul=*/Types::OType,
         /*ActAVMatMul=*/PassThroughActivation<Types::OType>,
-        /*ActASoftmax=*/PassThroughActivation<float>
+        /*ActASoftmax=*/QuantActivation<Types::AType>
     >;
+    // Scale factor for converting integer to float for computing the softmax
+    // and converting back to the same integer range
+    auto scale = 1.0f / (
+        (ap_uint<Types::AType::width + 1>{1} << Types::AType::width) - 1
+    );
     // Instance of the attention operator
-    Attention attention;
+    Attention attention(
+        {}, {}, QuantActivation<Types::AType>{scale, 0.0}, scale
+    );
     // Output stream to be filled by the attention operator
     Attention::OStream attention_out;
     // Apply the attention operator to the input streams

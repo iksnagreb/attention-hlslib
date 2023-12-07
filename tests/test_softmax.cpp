@@ -39,16 +39,22 @@ BOOST_AUTO_TEST_CASE(test_softmax_simple) {
     BOOST_CHECK(all_close(y, qy.dequantize(), qy.scale));
 
 //    // For debugging print scale parameters
-//    std::printf("z.scale=%4.4f, z.bias=%4.4f\n", z.scale, z.bias);
-//    std::printf("q.scale=%4.4f, q.bias=%4.4f\n", q.scale, q.bias);
+//    std::printf("qx.scale=%4.4f, qx.bias=%4.4f\n", qx.scale, qx.bias);
+//    std::printf("qy.scale=%4.4f, qy.bias=%4.4f\n", qy.scale, qy.bias);
 
     // Generate streams of the quantized matrices
     RowMajorMatrixStreamer<TestType> qx_elems(qx.z);
 
+    // Scale factor for converting integer to float for computing the softmax
+    // and converting back to the same integer range
+    float scale = 1.0f / (
+        (ap_uint<TestType::width + 1>{1} << TestType::width) - 1
+    );
+
     // Instantiate a softmax normalization function with quantization scales
     // inferred above
-    Softmax<N, /*PE=*/1, TestType, TestType> softmax {
-        {}, qx.scale, qx.bias, qy.scale, qy.bias
+    Softmax<N, /*PE=*/1, TestType, TestType, QuantActivation<TestType>> softmax{
+        QuantActivation<TestType>{scale, 0.0}, qx.scale
     };
 
     // Normalize all rows of the output matrix
@@ -56,14 +62,14 @@ BOOST_AUTO_TEST_CASE(test_softmax_simple) {
     softmax(qx_elems.out, softmax_out, /*rep=*/M);
 
     // Matrix to be filled by softmax stream
-    decltype(qy) qs = qy;
+    decltype(qy) qs{{}, scale, 0.0};
     // Read the softmax output back into memory
     RowMajorMatrixStreamer<TestType>::read(softmax_out, qs.z);
 
     // Validate results by checking whether dequantized values are within
     // tolerance: Errors should never exceed one "step of scale"
     //  TODO: Apparently this can happen due to floating point imprecision...
-    BOOST_CHECK(all_close(qy.dequantize(), qs.dequantize(), 0.1f));
+    BOOST_CHECK(all_close(qy.dequantize(), qs.dequantize(), scale));
 
     // Sanity checks: All streams should be empty by now
     BOOST_CHECK(qx_elems.out.empty());
@@ -94,11 +100,16 @@ BOOST_AUTO_TEST_CASE(test_softmax_grouped) {
     // Group the input stream into PE parallel elements
     GroupStreamElements<TestType, PE> qx_grouped(qx_elems.out);
 
+    // Scale factor for converting integer to float for computing the softmax
+    // and converting back to the same integer range
+    float scale = 1.0f / (
+        (ap_uint<TestType::width + 1>{1} << TestType::width) - 1
+    );
+
     // Instantiate a softmax normalization function with quantization scales
     // inferred above
-    Softmax<N / PE, /*PE=*/PE, TestType, TestType> softmax {
-        {}, qx.scale, qx.bias, qy.scale, qy.bias
-    };
+    Softmax<N / PE, /*PE=*/PE, TestType, TestType, QuantActivation<TestType>>
+        softmax{QuantActivation<TestType>{scale, 0.0}, qx.scale};
 
     // Normalize all rows of the output matrix
     decltype(softmax)::OStream softmax_out;
@@ -109,14 +120,14 @@ BOOST_AUTO_TEST_CASE(test_softmax_grouped) {
         softmax_out
     );
     // Matrix to be filled by softmax stream
-    decltype(qy) qs = qy;
+    decltype(qy) qs{{}, scale, 0.0};
     // Read the softmax output back into memory
     RowMajorMatrixStreamer<TestType>::read(softmax_elems.out, qs.z);
 
     // Validate results by checking whether dequantized values are within
     // tolerance: Errors should never exceed one "step of scale"
     //  TODO: Apparently this can happen due to floating point imprecision...
-    BOOST_CHECK(all_close(qy.dequantize(), qs.dequantize(), 0.1f));
+    BOOST_CHECK(all_close(qy.dequantize(), qs.dequantize(), scale));
 
     // Sanity checks: All streams should be empty by now
     BOOST_CHECK(qx_elems.out.empty());

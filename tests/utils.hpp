@@ -601,6 +601,19 @@ template<std::size_t Width, std::size_t M, std::size_t N>
         float scale, bias;
 
         // Quantizes a float matrix
+        explicit Quantized(
+            const Matrix<float, M, N> &x, const float scale, const float bias)
+            : scale{scale}, bias{bias} {
+            // Iterate the indices in row-major order
+            for(unsigned i = 0; i < M; ++i) {
+                for(unsigned j = 0; j < N; ++j) {
+                    // Quantize the element
+                    z[i][j] = std::round((x[i][j] - bias) / scale);
+                }
+            }
+        }
+
+        // Quantizes a float matrix
         explicit Quantized(const Matrix<float, M, N> &x) {
             // Find minimum and maximum of the input matrix
             float min = +INFINITY, max = -INFINITY;
@@ -732,5 +745,27 @@ template<std::size_t NF, std::size_t PE, class IType, class OType>
         // Return the prepared thresholds activation function
         return thresholds;
     }
+
+// Activation function quantizing floating-point values via scale and bias
+// parameters and rounding
+template<class Type>
+    class QuantActivation : public Activation<float, Type> {
+        // Scale factor to be used for quantizing float values
+        float scale;
+        // Bias to be added to each value
+        float bias;
+
+    public:
+        // Initializes the quantizer from scale and bias parameters
+        explicit QuantActivation(const float scale, const float bias)
+            : scale{scale}, bias{bias} {}
+
+        // Applies activation function to a single element
+        Type activate(unsigned const, unsigned const, float const &accu) const {
+#pragma HLS inline
+            // Quantize, round and implicitly type-cast from float to Type
+            return std::round((accu - bias) / scale);
+        }
+    };
 
 #endif //ATTENTION_HLSLIB_UTILS_HPP
