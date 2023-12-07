@@ -44,9 +44,6 @@ template<
         //  Note: No dequantizer bias necessary as softmax is shift invariant
         const float dequant = 1.0;
 
-//        Softmax(Activation activation, float dequant)
-//         : activation{activation}, iscale{iscale} {}
-
         // Short names to the input and output streams of parallel elements
         using IStream = hls::stream<ap_uint<GroupSize * IType::width>>;
         using OStream = hls::stream<ap_uint<GroupSize * OType::width>>;
@@ -65,11 +62,11 @@ template<
             using ZType = ap_uint<24>;
 
             // Maximum possible value of input elements
-            IType max_x = (IType{1} << IType::width) - 1;
+            IType max_x = (ap_uint<IType::width + 1>{1} << IType::width) - 1;
             // Maximum possible value of intermediate elements
-            ZType max_z = (ZType{1} << ZType::width) - 1;
+            ZType max_z = (ap_uint<ZType::width + 1>{1} << ZType::width) - 1;
             // Maximum possible value of exponential of the input elements
-            float max_e = std::exp(dequant * max_x);
+            float max_e = std::ceil(std::exp(dequant * max_x));
             // Scale factor to convert from float to the intermediate format
             float scale = (float)max_z / max_e;
 
@@ -149,7 +146,11 @@ template<
                         // Accumulate the exponential for normalizing in the
                         // second loop: Convert from float to integer to
                         // optimize latency
-                        state.total += (ZType)(ex * scale);
+                        //  TODO: I do not really understand why the extra bit
+                        //   is necessary, maybe to account for rounding?
+                        state.total += ap_uint<ZType::width + 1> {
+                            std::round((ex * scale))
+                        };
 
                         // Detect overflow by checking the highest bit
                         if(state.total.test(ZType::width + Len)) {
