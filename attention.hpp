@@ -192,7 +192,9 @@ template<
         // have scales and an activation function requiring parameters to be
         // initialized once at construction/compile time and thus cannot be
         // instantiated within the operator function call.
-        Softmax<SeqFold, S_ELEMS, OutQKMatMul, AType, ActASoftmax> softmax;
+        Softmax<
+            SeqFold, S_ELEMS, OutQKMatMul, AType, ActASoftmax, QLen
+        > softmax;
 
         // Sets up the attention operator by initializing the activations
         //  Note: Just passes the activation initializer to the matmul and
@@ -236,7 +238,7 @@ template<
             // Normalize the attention weights via softmax feeding some internal
             // stream connecting to the attention-values matmul.
             AStream softmax_out;
-            softmax(qk_out, softmax_out, QLen);
+            softmax(qk_out, softmax_out);
 // Set depth of the output stream to fit the entire output length
 #pragma HLS stream variable=softmax_out depth=QLen * SeqFold
 

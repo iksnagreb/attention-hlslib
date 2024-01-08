@@ -53,13 +53,12 @@ BOOST_AUTO_TEST_CASE(test_softmax_simple) {
 
     // Instantiate a softmax normalization function with quantization scales
     // inferred above
-    Softmax<N, /*PE=*/1, TestType, TestType, QuantActivation<TestType>> softmax{
-        QuantActivation<TestType>{scale, 0.0}, qx.scale
-    };
+    Softmax<N, /*PE=*/1, TestType, TestType, QuantActivation<TestType>, M>
+        softmax{QuantActivation<TestType>{scale, 0.0}, qx.scale};
 
     // Normalize all rows of the output matrix
     decltype(softmax)::OStream softmax_out;
-    softmax(qx_elems.out, softmax_out, /*rep=*/M);
+    softmax(qx_elems.out, softmax_out);
 
     // Matrix to be filled by softmax stream
     decltype(qy) qs{{}, scale, 0.0};
@@ -108,12 +107,12 @@ BOOST_AUTO_TEST_CASE(test_softmax_grouped) {
 
     // Instantiate a softmax normalization function with quantization scales
     // inferred above
-    Softmax<N / PE, /*PE=*/PE, TestType, TestType, QuantActivation<TestType>>
+    Softmax<N / PE, /*PE=*/PE, TestType, TestType, QuantActivation<TestType>, M>
         softmax{QuantActivation<TestType>{scale, 0.0}, qx.scale};
 
     // Normalize all rows of the output matrix
     decltype(softmax)::OStream softmax_out;
-    softmax(qx_grouped.out, softmax_out, /*rep=*/M);
+    softmax(qx_grouped.out, softmax_out);
 
     // Split the output stream for validation
     SplitStreamElements<ap_uint<TestType::width * PE>, PE> softmax_elems(

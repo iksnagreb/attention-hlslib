@@ -32,7 +32,10 @@ template<
     // Datatype of single output elements
     class OType,
     // Output activation function
-    class Activation = PassThroughActivation<float>
+    class Activation = PassThroughActivation<float>,
+    // Number of rows of the attention matrix or repetitions of the softmax
+    // operator for batches
+    std::size_t NumRows = 1
 >
     struct Softmax {
         // Activation function which potentially contains parameter: e.g.
@@ -53,7 +56,7 @@ template<
 
         // Receives repeated streams of not-normalized values and produces a
         // softmax normalized output stream
-        void operator()(IStream &in, OStream &out, const std::size_t rep = 1) {
+        void operator()(IStream &in, OStream &out) {
 // Use task-level pipelining in the following, allowing the loops to overlap
 #pragma HLS dataflow
             // Type used to convert exponentiated elements to integers for
@@ -68,7 +71,7 @@ template<
             // Maximum possible value of exponential of the input elements
             float max_e = std::ceil(std::exp(dequant * max_x));
             // Scale factor to convert from float to the intermediate format
-            float scale = (float)max_z / max_e;
+            float scale = (float) max_z / max_e;
 
             // Structure packing all state information which needs to be
             // communicated from one loop to the other
@@ -103,12 +106,12 @@ template<
             hls::stream<StatePack> state_buffer;
 // This buffer needs to hold one state per repetition, i.e., per row
 //  TODO: Referring to a function argument does probably not work...
-#pragma HLS stream variable=state_buffer depth=rep
+#pragma HLS stream variable=state_buffer depth=NumRows
 
             // Value buffer between the two loops
             hls::stream<ValuePack> value_buffer;
 // This buffer needs to hold one value pack per group of elements
-#pragma HLS stream variable=value_buffer depth=rep * NumGroups
+#pragma HLS stream variable=value_buffer depth=NumRows * NumGroups
 
             // Scope of the first loop to have simple short names for locals
             {
@@ -119,7 +122,7 @@ template<
 
                 // Operate as long as there are elements in the input stream
                 sm_loop1:
-                for(std::size_t i = 0; i < rep * NumGroups; ++i) {
+                for(std::size_t i = 0; i < NumRows * NumGroups; ++i) {
 // Pipeline the steps of this loop
 #pragma HLS pipeline II=1 style=flp
                     // Read and slice the next group from the input stream
@@ -148,7 +151,7 @@ template<
                         // optimize latency
                         //  TODO: I do not really understand why the extra bit
                         //   is necessary, maybe to account for rounding?
-                        state.total += ap_uint<ZType::width + 1> {
+                        state.total += ap_uint<ZType::width + 1>{
                             std::round((ex * scale))
                         };
 
@@ -192,7 +195,7 @@ template<
 
                 // Operate as long as there are elements in the input stream
                 sm_loop2:
-                for(std::size_t i = 0; i < rep * NumGroups; ++i) {
+                for(std::size_t i = 0; i < NumRows * NumGroups; ++i) {
 // Pipeline the steps of this loop
 #pragma HLS pipeline II=1 style=flp
                     // Receive new state at the start of a row, i.e., for each
