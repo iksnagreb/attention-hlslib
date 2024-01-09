@@ -215,40 +215,47 @@ template<
         // Constructor-call style interface of the attention operator: Connects
         // to the three input streams at operator instantiation and fills the
         // internal, instance output stream.
-        void operator()(QStream &q, KStream &k, VStream &v, OStream &out) {
+        template<class Mask>
+            void operator()(
+                QStream &q, KStream &k, VStream &v, OStream &out, Mask &&mask) {
 // Allow functions and loops to overlap in the following
 #pragma HLS dataflow
 
-            // Tiling of the streamed key matrix
-            KTiler k_tiles(k, QLen);
-            // Tiling of the streamed value matrix
-            VTiler v_tiles(v, QLen);
+                // Tiling of the streamed key matrix
+                KTiler k_tiles(k, QLen);
+                // Tiling of the streamed value matrix
+                VTiler v_tiles(v, QLen);
 // Set depth of the output stream to fit the entire output length
 #pragma HLS stream variable=k_tiles.out depth=QLen * SeqFold * EmbFold
 // Set depth of the output stream to fit the entire output length
 #pragma HLS stream variable=v_tiles.out depth=QLen * SeqFold * EmbFold
 
-            // Multiply the query to the tiled key stream feeding some internal
-            // stream connecting to the attention-weights normalization softmax.
-            typename QKMatMul::OutStream qk_out;
-            qk_matmul(q, k_tiles.out, qk_out, QLen);
+                // Multiply the query to the tiled key stream feeding some
+                // internal stream connecting to the attention-weights
+                // normalization softmax.
+                typename QKMatMul::OutStream qk_out;
+                qk_matmul(q, k_tiles.out, qk_out, QLen);
 // Set depth of the output stream to fit the entire output length
 #pragma HLS stream variable=qk_out depth=QLen * SeqFold
 
-            // Normalize the attention weights via softmax feeding some internal
-            // stream connecting to the attention-values matmul.
-            AStream softmax_out;
-            softmax(qk_out, softmax_out);
+                // Normalize the attention weights via softmax feeding some
+                // internal stream connecting to the attention-values matmul.
+                AStream softmax_out;
+                softmax(qk_out, softmax_out, mask);
 // Set depth of the output stream to fit the entire output length
 #pragma HLS stream variable=softmax_out depth=QLen * SeqFold
 
-            // Multiply the normalized attention weights to the tiled value
-            // stream directly feeding the output stream.
-            av_matmul(softmax_out, v_tiles.out, out, QLen);
+                // Multiply the normalized attention weights to the tiled value
+                // stream directly feeding the output stream.
+                av_matmul(softmax_out, v_tiles.out, out, QLen);
 // Set depth of the output stream to fit the entire output length
 #pragma HLS stream variable=out depth=QLen * EmbFold
-        }
+            }
 
+        // No masking version of the attention operator
+        void operator()(QStream &q, KStream &k, VStream &v, OStream &out) {
+            (*this)(q, k, v, out, attention::mask::NONE);
+        }
     };
 
 #endif // ATTENTION_HPP
