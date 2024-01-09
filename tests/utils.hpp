@@ -52,6 +52,21 @@ template<class Type, std::size_t M, std::size_t N>
             // chaining
             return *this;
         }
+
+        // Elementwise addition operator
+        friend Matrix operator+ (const Matrix &lhs, const Matrix &rhs) {
+            // Allocate a new result matrix
+            Matrix result;
+            // Iterate the indices in row-major order
+            for(unsigned i = 0; i < M; ++i) {
+                for(unsigned j = 0; j < N; ++j) {
+                    // Add elements from left and right hand side into result
+                    result[i][j] = lhs[i][j] + rhs[i][j];
+                }
+            }
+            // Return the result matrix by copy
+            return result;
+        }
     };
 
 
@@ -75,7 +90,7 @@ template<class Type, std::size_t M, std::size_t N>
         return matrix;
     }
 
-// Creates a randomly filled matrix of shape M x N of Type
+// Creates a randomly filled matrix of shape M x N
 template<std::size_t M, std::size_t N>
     Matrix<float, M, N> randf_matrix() {
         // Allocate the matrix on the stack
@@ -85,6 +100,38 @@ template<std::size_t M, std::size_t N>
             for(unsigned j = 0; j < N; ++j) {
                 // Generate random number in range 0.0 to 1.0
                 matrix[i][j] = float(std::rand()) / float(RAND_MAX);   // NOLINT
+            }
+        }
+        // Return the matrix from the stack by copy
+        return matrix;
+    }
+
+// Creates a causal attention mask matrix of shape M x N
+template<std::size_t M, std::size_t N>
+    Matrix<float, M, N> causal_mask() {
+        // Allocate the matrix on the stack
+        Matrix<float, M, N> matrix;
+        // Iterate the indices in row-major order
+        for(unsigned i = 0; i < M; ++i) {
+            for(unsigned j = 0; j < N; ++j) {
+                // Mask elements above the main diagonal by -inf
+                matrix[i][j] = j > i ? -INFINITY : 0.0;  // NOLINT
+            }
+        }
+        // Return the matrix from the stack by copy
+        return matrix;
+    }
+
+// Creates a random attention mask matrix of shape M x N
+template<std::size_t M, std::size_t N>
+    Matrix<float, M, N> randf_mask() {
+        // Allocate the matrix on the stack
+        Matrix<float, M, N> matrix;
+        // Iterate the indices in row-major order
+        for(unsigned i = 0; i < M; ++i) {
+            for(unsigned j = 0; j < N; ++j) {
+                // Mask elements above the main diagonal by -inf
+                matrix[i][j] = std::rand() % 2 ? -INFINITY : 0.0;  // NOLINT
             }
         }
         // Return the matrix from the stack by copy
