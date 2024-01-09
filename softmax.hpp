@@ -20,6 +20,54 @@
 // Flattening of buffers to bit vectors
 #include "flatten.hpp"
 
+// Wrap config containers in a namespace to not clutter the global namespace
+// with generic terms like "Shapes" and "Types"...
+namespace attention {
+namespace mask {
+// No attention mask: More of a tag type, does not contain any data
+// or functionality
+struct None {
+    // Empty, just a tag type
+};
+// Static instance of the tag for convenient tag-dispatching
+[[maybe_unused]] static constexpr None NONE;
+
+// Causal attention mask: More of a tag type, does not contain any data
+// or functionality
+struct Causal {
+    // Empty, just a tag type
+};
+// Static instance of the tag for convenient tag-dispatching
+[[maybe_unused]] static constexpr Causal CAUSAL;
+
+// Constant attention mask: The mask is stored as a packed binary matrix
+// where 0 <=> 0, 1 <=> -inf
+template<
+    // Number of input groups making up a complete feature map to be normalized
+    std::size_t NumGroups,
+    // Number of grouped input elements, i.e. input parallelism
+    std::size_t GroupSize,
+    // Number of rows of the attention matrix or repetitions of the softmax
+    // operator for batches
+    std::size_t NumRows = 1
+>
+    using Const = ap_uint<GroupSize>[NumRows][NumGroups];
+
+// Input attention mask: The input mask is provided via a streaming
+// interface, grouping GroupSize mask bits  where 0 <=> 0, 1 <=> -inf
+template<
+    // Number of input groups making up a complete feature map to be normalized
+    std::size_t /*NumGroups*/,
+    // Number of grouped input elements, i.e. input parallelism
+    std::size_t GroupSize,
+    // Number of rows of the attention matrix or repetitions of the softmax
+    // operator for batches
+    std::size_t /*NumRows*/ = 1
+>
+    using Input = hls::stream<ap_uint<GroupSize>/*,DEPTH=NumRows * NumGroups*/>;
+}
+}
+
 // Streaming softmax with GroupSize parallelism handling and task-level
 // parallelism
 template<
@@ -54,77 +102,57 @@ template<
         // Total length of the feature map
         static constexpr std::size_t Len = NumGroups * GroupSize;
 
-        // No attention mask: More of a tag type, does not contain any data
-        // or functionality
-        struct NoMask {
-        };
-
-        // Causal attention mask: More of a tag type, does not contain any data
-        // or functionality
-        struct CausalMask {
-            // Empty
-        };
-
-        // Constant attention mask: The mask is stored as a packed binary matrix
-        // where 0 <=> 0, 1 <=> -inf
-        using ConstMask = ap_uint<GroupSize>[NumRows][NumGroups];
-
-        // Input attention mask: The input mask is provided via a streaming
-        // interface, grouping GroupSize mask bits  where 0 <=> 0, 1 <=> -inf
-        using InputMask = hls::stream<
-            ap_uint<GroupSize>, /*DEPTH=*/NumRows * NumGroups
-        >;
-
-        // Type used to convert exponentiated elements to integers for
-        // accumulation
-        //  Note: 24 bits is a kind of arbitrary choice...
-        using ZType = ap_uint<24>;
-
-        // Maximum possible value of input elements
-        IType max_x = (ap_uint<IType::width + 1>{1} << IType::width) - 1;
-        // Maximum possible value of intermediate elements
-        ZType max_z = (ap_uint<ZType::width + 1>{1} << ZType::width) - 1;
-        // Maximum possible value of exponential of the input elements
-        float max_e = std::ceil(std::exp(dequant * max_x));
-        // Scale factor to convert from float to the intermediate format
-        float scale = (float) max_z / max_e;
-
-        // Structure packing all state information which needs to be
-        // communicated from one loop to the other
-        struct State {
-            // Maximum value per row, i.e., per feature map and the count of
-            // these values for overflow handling
-            // @formatter:off
-            IType max_value; ap_uint<clog2(Len + 1)> max_count = 0;
-            // @formatter:on
-
-            // The total over the exponentiated feature map, i.e., the sum
-            // of exp(x) along the row computed in integer arithmetic
-            //  Note: Needs to fit Len additions of ZType::width sized
-            //  elements + 1 overflow bit
-            ap_uint<ZType::width + Len + 1> total = 0;
-
-            // Track whether there has been an overflow accumulating the
-            // total
-            bool overflow = false;
-        };
-
-        // Structure packing the elementwise input and intermediate stream
-        // connecting the two loops
-        struct Value {
-            // Original input type elements as separate elements
-            IType ix[GroupSize];
-            // Elementwise floating point exponential of the inputs
-            float ex[GroupSize];
-        };
-
-
         // Receives repeated streams of not-normalized values and produces a
         // softmax normalized output stream
-        template<class Mask = NoMask>
-            void operator()(IStream &in, OStream &out, Mask &&mask = NoMask{}) {
+        template<class Mask = attention::mask::None>
+            void operator()(IStream &in, OStream &out, Mask &&mask = Mask{}) {
 // Use task-level pipelining in the following, allowing the loops to overlap
 #pragma HLS dataflow
+
+                // Type used to convert exponentiated elements to integers for
+                // accumulation
+                //  Note: 24 bits is a kind of arbitrary choice...
+                using ZType = ap_uint<24>;
+
+                // Maximum possible value of input elements
+                IType max_x =
+                    (ap_uint<IType::width + 1>{1} << IType::width) - 1;
+                // Maximum possible value of intermediate elements
+                ZType max_z =
+                    (ap_uint<ZType::width + 1>{1} << ZType::width) - 1;
+                // Maximum possible value of exponential of the input elements
+                float max_e = std::ceil(std::exp(dequant * max_x));
+                // Scale factor to convert from float to the intermediate format
+                float scale = (float) max_z / max_e;
+
+                // Structure packing all state information which needs to be
+                // communicated from one loop to the other
+                struct State {
+                    // Maximum value per row, i.e., per feature map and the
+                    // count of these values for overflow handling
+                    // @formatter:off
+                    IType max_value; ap_uint<clog2(Len + 1)> max_count = 0;
+                    // @formatter:on
+
+                    // The total over the exponentiated feature map, i.e., the
+                    // sum of exp(x) along the row in integer arithmetic
+                    //  Note: Needs to fit Len additions of ZType::width sized
+                    //  elements + 1 overflow bit
+                    ap_uint<ZType::width + Len + 1> total = 0;
+
+                    // Track whether there has been an overflow accumulating the
+                    // total
+                    bool overflow = false;
+                };
+
+                // Structure packing the elementwise input and intermediate
+                // stream connecting the two loops
+                struct Value {
+                    // Original input type elements as separate elements
+                    IType ix[GroupSize];
+                    // Elementwise floating point exponential of the inputs
+                    float ex[GroupSize];
+                };
 
                 // State buffer between the two loops
                 hls::stream<State> state_buffer;
@@ -144,12 +172,15 @@ template<
                     Value value;
 
                     // Operate as long as there are elements in the input stream
-                    sm_loop1:
+                    [[maybe_unused]] sm_loop1:
                     for(std::size_t i = 0; i < NumRows * NumGroups; ++i) {
 // Pipeline the steps of this loop
 #pragma HLS pipeline II=1 style=flp
                         // Read and slice the next group from the input stream
                         auto buffer = Slice<IType>{}(in.read());
+                        // Get the attention mask bits corresponding to this
+                        // group. This might be "Void", depending on the mask
+                        // type.
                         auto mask_bits = maybe_mask(mask, i);
 
                         // Process the GroupSize elements in parallel
@@ -235,7 +266,7 @@ template<
                     float den;
 
                     // Operate as long as there are elements in the input stream
-                    sm_loop2:
+                    [[maybe_unused]] sm_loop2:
                     for(std::size_t i = 0; i < NumRows * NumGroups; ++i) {
 // Pipeline the steps of this loop
 #pragma HLS pipeline II=1 style=flp
@@ -298,18 +329,11 @@ template<
                 }
             }
 
-        // Default (none) mask does not manifest as a real mask object
-        template<class Mask>
-            auto maybe_mask(Mask, std::size_t) {
-                // Local dummy type serving as "void"
-                // @formatter:off
-                struct Void {};
-                return Void {};
-                // @formatter:on
-            }
-
-        // Causal mask does not manifest as a real mask object
-        auto maybe_mask(CausalMask, std::size_t) {
+        // Implementation details of masked attention, mostly tag dispatching
+        // depending on the mask type to unify the interface above.
+    private:
+        // None mask does not manifest as a real mask object
+        [[maybe_unused]] auto maybe_mask(attention::mask::None, std::size_t) {
             // Local dummy type serving as "void"
             // @formatter:off
             struct Void {};
@@ -317,39 +341,57 @@ template<
             // @formatter:on
         }
 
-        // Constant mask can be accessed from memory
-        auto maybe_mask(const ConstMask &mask, std::size_t i) {
-            return mask[i / GroupSize][i % GroupSize];
+        // Causal mask does not manifest as a real mask object
+        [[maybe_unused]] auto maybe_mask(attention::mask::Causal, std::size_t) {
+            // Local dummy type serving as "void"
+            // @formatter:off
+            struct Void {};
+            return Void {};
+            // @formatter:on
         }
 
+        // Make the constant mask type available using shorthand notation
+        using Const = attention::mask::Const<NumGroups, GroupSize, NumRows>;
+
+        // Constant mask can be accessed from memory
+        [[maybe_unused]] auto maybe_mask(const Const &mask, std::size_t i) {
+            // Convert flat group index to row and col index
+            return mask[i / NumGroups][i % NumGroups];
+        }
+
+        // Make the input mask available using shorthand notation
+        using Input = attention::mask::Input<NumGroups, GroupSize, NumRows>;
+
         // Input mask is read from input stream
-        auto maybe_mask(InputMask &mask, std::size_t i) {
+        [[maybe_unused]] auto maybe_mask(Input &mask, std::size_t) {
             return mask.read();
         }
 
         // Tests whether the element at (i,pe) should be masked
         template<class Mask, class Bits>
-            bool is_masked(Mask, Bits, std::size_t, std::size_t) {
+            [[maybe_unused]] bool is_masked(
+                Mask, Bits, std::size_t, std::size_t) {
                 // By default, do not mask anything
                 return false;
             }
 
-        // Causal mask does n ot manifest as bits, only depends on the i and pe
+        // Causal mask does not manifest as bits, only depends on the i and pe
         // indices
         template<class Bits>
-            bool is_masked(CausalMask, Bits, std::size_t i, std::size_t pe) {
-                // Compare column and row index to see whether the element if
+            [[maybe_unused]] bool is_masked(
+                attention::mask::Causal, Bits, std::size_t i, std::size_t pe) {
+                // Compare column and row index to see whether the element is
                 // above the main diagonal
-                return i % GroupSize + pe > i / GroupSize;
+                return GroupSize * (i % NumGroups) + pe > i / NumGroups;
             }
 
-        // Constant and input masks manifest as sliced bit-vectors, we do not
-        // care from which type these originate
+        // Constant and input masks manifest as bit-vectors, we do not care from
+        // which type these originate
         template<class Mask>
-            bool is_masked(
-                Mask, ap_uint<GroupSize> bits, std::size_t, std::size_t pe) {
-                // Invert the mask bit, as 1 <=> -inf, which means "masked"
-                return !bits.test(pe);
+            [[maybe_unused]] bool is_masked(
+                Mask &&, ap_uint<GroupSize> bits, std::size_t, std::size_t pe) {
+                // Get the mask bit at pe index, 1 <=> -inf which means "masked"
+                return bits.test(pe);
             }
     };
 
