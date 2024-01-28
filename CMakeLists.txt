@@ -12,6 +12,8 @@ include_directories($ENV{VITIS_HLS_PATH}/include)
 include_directories($ENV{FINN_HLSLIB})
 # Local attention library
 include_directories(.)
+# Enable constexpr in vitis hlslib
+add_compile_definitions(HLS_CONSTEXPR_ENABLE)
 
 # Include tests from subdirectory
 add_subdirectory(tests)

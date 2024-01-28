@@ -725,41 +725,10 @@ template<int Width>
     constexpr std::size_t get_num_possible_values<ap_int<Width>> =
         ap_uint<Width + 1>{1} << Width;
 
-// Get the minimum value of a datatype
-template<class Type>
-    constexpr auto min = Type{0};
-
-// Get the maximum value of a datatype
-template<class Type>
-    constexpr auto max = Type{0};
-
-// Specialize the minimum value of ap_uint
-template<int Width>
-    constexpr auto min<ap_uint<Width>> = ap_uint<Width>{0};
-
-// Specialize the maximum value of ap_uint
-template<int Width>
-    constexpr auto max<ap_uint<Width>> = (ap_uint<Width + 1>{1} << Width) - 1;
-
-// Specialize the minimum value of ap_int
-template<int Width>
-    constexpr auto min<ap_int<Width>> = -(ap_int<Width + 1>{1} << (Width - 1));
-
-// Specialize the maximum value of ap_int
-template<int Width>
-    constexpr auto max<ap_int<Width>> =
-        (ap_int<Width + 1>{1} << (Width - 1)) - 1;
-
-// Get the minimum value of a dummy float
-template<>
-    constexpr auto min<float> = float{0.0};
-
-// Get the maximum value of a dummy float
-template<>
-    constexpr auto max<float> = float{1.0};
-
 // FINN HLSLIB activation functions: e.g. pass-through and thresholds
 #include <activations.hpp>
+// Numeric limits of arbitrary precision datatypes
+#include "limits.hpp"
 
 // Generates quantized identity function thresholds activations of IType to
 // OType

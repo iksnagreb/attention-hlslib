@@ -3,9 +3,6 @@
 
 #include <boost/test/unit_test.hpp>
 
-// Enable constexpr in vitis hlslib
-#define HLS_CONSTEXPR_ENABLE
-
 // Arbitrary precision integers, i.e. bit-vectors
 #include <ap_int.h>
 

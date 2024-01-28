@@ -17,8 +17,11 @@
 // FINN HLSLIB activation functions: e.g. pass-through and thresholds
 #include <activations.hpp>
 
+// Numeric limits of arbitrary precision datatypes
+#include "limits.hpp"
 // Flattening of buffers to bit vectors
 #include "flatten.hpp"
+
 
 // Wrap config containers in a namespace to not clutter the global namespace
 // with generic terms like "Shapes" and "Types"...
@@ -102,6 +105,13 @@ template<
         // Total length of the feature map
         static constexpr std::size_t Len = NumGroups * GroupSize;
 
+        // Type used to convert exponentiated elements to integers for
+        // accumulation
+        //  Note: 24 bits is a kind of arbitrary choice...
+        using ZType = ap_uint<24>;
+        // Scale factor to convert from float to the intermediate format
+        static constexpr float scale = max<ZType>;
+
         // Receives repeated streams of not-normalized values and produces a
         // softmax normalized output stream
         template<class Mask = attention::mask::None>
@@ -109,21 +119,66 @@ template<
 // Use task-level pipelining in the following, allowing the loops to overlap
 #pragma HLS dataflow
 
-                // Type used to convert exponentiated elements to integers for
-                // accumulation
-                //  Note: 24 bits is a kind of arbitrary choice...
-                using ZType = ap_uint<24>;
+                // FIFO buffer holding the maximum value per row to be
+                // subtracted from the softmax inputs for numerical stability,
+                // i.e., to prevent overflow of std::exp.
+                hls::stream<IType> max_buffer;
+// This buffer needs to hold one state per repetition, i.e., per row
+#pragma HLS stream variable=max_buffer depth=NumRows
+                // Copy of the inputs after searching for the maximum
+                IStream tmp;
+// This buffer needs to hold one copy per group of elements
+#pragma HLS stream variable=tmp depth=NumRows * NumGroups
 
-                // Maximum possible value of input elements
-                IType max_x =
-                    (ap_uint<IType::width + 1>{1} << IType::width) - 1;
-                // Maximum possible value of intermediate elements
-                ZType max_z =
-                    (ap_uint<ZType::width + 1>{1} << ZType::width) - 1;
-                // Maximum possible value of exponential of the input elements
-                float max_e = std::ceil(std::exp(dequant * max_x));
-                // Scale factor to convert from float to the intermediate format
-                float scale = (float) max_z / max_e;
+                // Scope of the zero loop to have simple short names for locals
+                {
+                    // Track the current maximum value
+                    IType max_value = min<IType>;
+
+                    // Operate as long as there are elements in the input stream
+                    [[maybe_unused]] sm_loop0:
+                    for(std::size_t i = 0; i < NumRows * NumGroups; ++i) {
+// Pipeline the steps of this loop
+#pragma HLS pipeline II=1 style=flp
+                        // Read the next group of elements from the stream
+                        const auto next = in.read();
+                        // Send a copy of the input to the next loop
+                        tmp.write(next);
+                        // Slice the next group from the input stream
+                        const auto buffer = Slice<IType>{}(next);
+
+                        // Process the GroupSize elements in parallel
+                        for(std::size_t pe = 0; pe < GroupSize; ++pe) {
+// Inner loop should be unrolled
+#pragma HLS UNROLL
+                            // Note: No masking of the input here. If the
+                            // maximum is in a location which is masked later,
+                            // we probably lose a bit of precision, but this
+                            // should not be too bad.
+                            // TODO: Actually validate this claim...
+
+                            // Will hold the input element to be processed or
+                            // zero if masked
+                            IType x = buffer(pe, 0);
+                            // If the new value is larger than the current
+                            // maximum, update the maximum
+                            if(x > max_value) {
+                                // Only remember the value, we do not care for
+                                // the location here
+                                max_value = x;
+                            }
+                        }
+
+                        // Forward the state at the end of each row, i.e., for
+                        // each completion of a feature map
+                        if(((i + 1) % NumGroups) == 0) {
+                            // Send into buffer
+                            max_buffer.write(max_value);
+                            // Reset the maximum value
+                            max_value = min<IType>;
+                        }
+                    }
+                }
 
                 // Structure packing all state information which needs to be
                 // communicated from one loop to the other
@@ -171,13 +226,22 @@ template<
                     State state;
                     Value value;
 
+                    // Track the current maximum value of the row
+                    IType max_value = min<IType>;
+
                     // Operate as long as there are elements in the input stream
                     [[maybe_unused]] sm_loop1:
                     for(std::size_t i = 0; i < NumRows * NumGroups; ++i) {
 // Pipeline the steps of this loop
 #pragma HLS pipeline II=1 style=flp
+                        // Receive new state at the start of a row, i.e., for
+                        // each new feature map
+                        if((i % NumGroups) == 0) {
+                            // Read the new maximum for this row
+                            max_value = max_buffer.read();
+                        }
                         // Read and slice the next group from the input stream
-                        auto buffer = Slice<IType>{}(in.read());
+                        auto buffer = Slice<IType>{}(tmp.read());
                         // Get the attention mask bits corresponding to this
                         // group. This might be "Void", depending on the mask
                         // type.
@@ -187,6 +251,9 @@ template<
                         for(std::size_t pe = 0; pe < GroupSize; ++pe) {
 // Inner loop should be unrolled
 #pragma HLS UNROLL
+                            // TODO: This whole inner loop could probably be
+                            //  simplified
+
                             // Will hold the input element to be processed or
                             // zero if masked
                             IType x = 0;
@@ -201,10 +268,13 @@ template<
                                 x = buffer(pe, 0);
                                 // Convert to float, scale and compute
                                 // exponential function
-                                ex = std::exp(dequant * float(x));
+                                ex = std::exp(dequant * (float(x) - max_value));
 
                                 // Keep track of the maximum value encountered
                                 //  Note: Overflow handling only if not-masked
+                                //  TODO: We already have the maximum of this
+                                //   row... So maybe so we could get rid of one
+                                //   of the comparisons and a memory write?
                                 if(state.max_value < x ||
                                    state.max_count == 0) {
                                     // New maximum, occurred once
@@ -216,24 +286,19 @@ template<
                                 }
                             }
 
+                            // Insert the elements into the value pack
+                            value.ix[pe] = x;
+                            value.ex[pe] = ex;
+
                             // Accumulate the exponential for normalizing in the
-                            // second loop: Convert from float to integer to
-                            // optimize latency
-                            //  TODO: I do not really understand why the extra
-                            //   bit is necessary, maybe to account for
-                            //   rounding?
-                            state.total += ap_uint<ZType::width + 1>{
-                                std::round((ex * scale))
-                            };
+                            // second loop. Convert from float to integer to
+                            // optimize the latency.
+                            state.total += ZType{std::round(ex * scale)};
 
                             // Detect overflow by checking the highest bit
                             if(state.total.test(ZType::width + Len)) {
                                 state.overflow = true;
                             }
-
-                            // Insert the elements into the value pack
-                            value.ix[pe] = x;
-                            value.ex[pe] = ex;
                         }
 
                         // For each group, forward the value pack to the next
