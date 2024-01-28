@@ -157,8 +157,7 @@ template<
                             // not be too bad.
                             // TODO: Actually validate this claim...
 
-                            // Will hold the input element to be processed or
-                            // zero if masked
+                            // Single element from the input stream
                             IType x = buffer(pe, 0);
                             // If the new value is larger than the current
                             // maximum, update the maximum
@@ -309,10 +308,7 @@ template<
                             // Receive state from connecting buffer
                             state = state_buffer.read();
                             // Update the denominator, which is shared across
-                            // the whole feature map by default, normalize by
-                            // the total
-                            //  Note: Vitis reports "unsafe type casting from
-                            //  type 'size_t' to type 'float'" here, but why?
+                            // the whole feature map.
                             den = float(state.total) / scale;
                         }
 
