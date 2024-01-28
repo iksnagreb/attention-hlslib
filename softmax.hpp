@@ -118,13 +118,13 @@ template<
             void operator()(IStream &in, OStream &out, Mask &&mask = Mask{}) {
 // Use task-level pipelining in the following, allowing the loops to overlap
 #pragma HLS dataflow
-
                 // FIFO buffer holding the maximum value per row to be
                 // subtracted from the softmax inputs for numerical stability,
                 // i.e., to prevent overflow of std::exp.
                 hls::stream<IType> max_buffer;
 // This buffer needs to hold one state per repetition, i.e., per row
 #pragma HLS stream variable=max_buffer depth=NumRows
+
                 // Copy of the inputs after searching for the maximum
                 IStream tmp;
 // This buffer needs to hold one copy per group of elements
@@ -153,8 +153,8 @@ template<
 #pragma HLS UNROLL
                             // Note: No masking of the input here. If the
                             // maximum is in a location which is masked later,
-                            // we probably lose a bit of precision, but this
-                            // should not be too bad.
+                            // we probably lose some precision, but this should
+                            // not be too bad.
                             // TODO: Actually validate this claim...
 
                             // Will hold the input element to be processed or
@@ -183,21 +183,10 @@ template<
                 // Structure packing all state information which needs to be
                 // communicated from one loop to the other
                 struct State {
-                    // Maximum value per row, i.e., per feature map and the
-                    // count of these values for overflow handling
-                    // @formatter:off
-                    IType max_value; ap_uint<clog2(Len + 1)> max_count = 0;
-                    // @formatter:on
-
                     // The total over the exponentiated feature map, i.e., the
-                    // sum of exp(x) along the row in integer arithmetic
-                    //  Note: Needs to fit Len additions of ZType::width sized
-                    //  elements + 1 overflow bit
-                    ap_uint<ZType::width + Len + 1> total = 0;
-
-                    // Track whether there has been an overflow accumulating the
-                    // total
-                    bool overflow = false;
+                    // sum of exp(x) along the row in integer arithmetic. Needs
+                    // to fit Len additions of ZType::width sized elements.
+                    ap_uint<ZType::width + clog2(Len) + 1> total = 0;
                 };
 
                 // Structure packing the elementwise input and intermediate
@@ -226,7 +215,7 @@ template<
                     State state;
                     Value value;
 
-                    // Track the current maximum value of the row
+                    // Current maximum value per row
                     IType max_value = min<IType>;
 
                     // Operate as long as there are elements in the input stream
@@ -251,53 +240,36 @@ template<
                         for(std::size_t pe = 0; pe < GroupSize; ++pe) {
 // Inner loop should be unrolled
 #pragma HLS UNROLL
-                            // TODO: This whole inner loop could probably be
-                            //  simplified
-
-                            // Will hold the input element to be processed or
-                            // zero if masked
-                            IType x = 0;
-                            // Will hold the exponential of the input element of
-                            // zero if masked
-                            float ex = 0.0;
+                            // Initialize to zero input and exponential,
+                            // override if not masked.
+                            value.ix[pe] = 0;
+                            value.ex[pe] = 0;
 
                             // Optionally allows for masked attention
                             if(!is_masked(mask, mask_bits, i, pe)) {
                                 // Get the input element at the pe index out of
                                 // the packed group of parallel input elements
-                                x = buffer(pe, 0);
-                                // Convert to float, scale and compute
-                                // exponential function
-                                ex = std::exp(dequant * (float(x) - max_value));
+                                const auto x = buffer(pe, 0);
+                                // Exact, floating-point exponential of the
+                                // dequantized input Subtract the maximum for
+                                // stability, i.e., prevent std::exp to overflow
+                                // to infinity.
+                                const auto ex = std::exp(
+                                    dequant * (float(x) - max_value)
+                                );
+                                // Pass on the input to the next stage to be
+                                // compared to maximum for overflow handling
+                                value.ix[pe] = x;
+                                // Pass the exact, floating-point exponential to
+                                // the next stage
+                                // TODO: Should probably be rounded as well for
+                                //  consistency with the sum.
+                                value.ex[pe] = ex;
 
-                                // Keep track of the maximum value encountered
-                                //  Note: Overflow handling only if not-masked
-                                //  TODO: We already have the maximum of this
-                                //   row... So maybe so we could get rid of one
-                                //   of the comparisons and a memory write?
-                                if(state.max_value < x ||
-                                   state.max_count == 0) {
-                                    // New maximum, occurred once
-                                    state.max_value = x;
-                                    state.max_count = 1;
-                                } else if(state.max_value == x) {
-                                    // Got the old maximum again
-                                    state.max_count++;
-                                }
-                            }
-
-                            // Insert the elements into the value pack
-                            value.ix[pe] = x;
-                            value.ex[pe] = ex;
-
-                            // Accumulate the exponential for normalizing in the
-                            // second loop. Convert from float to integer to
-                            // optimize the latency.
-                            state.total += ZType{std::round(ex * scale)};
-
-                            // Detect overflow by checking the highest bit
-                            if(state.total.test(ZType::width + Len)) {
-                                state.overflow = true;
+                                // Accumulate the exponential for normalizing in
+                                // the next loop. Convert from float to integer
+                                // to optimize the latency.
+                                state.total += ZType{std::round(ex * scale)};
                             }
                         }
 
@@ -309,12 +281,8 @@ template<
                         if(((i + 1) % NumGroups) == 0) {
                             // Send state to be consumed by the next loop
                             state_buffer.write(state);
-                            // Reset the maximum tracking
-                            state.max_count = 0;
                             // Reset the accumulator
                             state.total = 0;
-                            // Reset the overflow state
-                            state.overflow = false;
                         }
                     }
                 }
@@ -346,11 +314,6 @@ template<
                             //  Note: Vitis reports "unsafe type casting from
                             //  type 'size_t' to type 'float'" here, but why?
                             den = float(state.total) / scale;
-                            // If there was an overflow, use the count of
-                            // maximal values instead
-                            if(state.overflow) {
-                                den = float(state.max_count);
-                            }
                         }
 
                         // Receive the next group of values form the
@@ -364,27 +327,10 @@ template<
                         for(std::size_t pe = 0; pe < GroupSize; ++pe) {
 // Inner loop should be unrolled
 #pragma HLS UNROLL
-                            // Numerator to be normalized
-                            float num;
-
-                            // Overflow handling
-                            if(state.overflow) {
-                                // In case of an overflow, distribute equal
-                                // weight to all occurrences of the maximum
-                                // value, such that the weights still sum to
-                                // one.
-                                num =
-                                    value.ix[pe] == state.max_value ? 1.0 : 0.0;
-                            } else {
-                                // In case of no overflow, normalize the
-                                // exponential values by the accumulated total
-                                num = value.ex[pe];
-                            }
-
                             // Read next element into the buffer and scale to
                             // cover the right output range
                             buffer[pe] = activation.activate(
-                                i % NumGroups, pe, num / den
+                                i % NumGroups, pe, value.ex[pe] / den
                             );
                         }
 
