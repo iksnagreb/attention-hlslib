@@ -212,9 +212,9 @@ template<
             // Nothing else to do here...
         }
 
-        // Constructor-call style interface of the attention operator: Connects
-        // to the three input streams at operator instantiation and fills the
-        // internal, instance output stream.
+        // Scaled Dot-Product Attention operator interface as function-call
+        // style. Receives three matrices - query, key, value - as input streams
+        // and forwards the optional attention mask to the softmax operator.
         template<class Mask>
             void operator()(
                 QStream &q, KStream &k, VStream &v, OStream &out, Mask &&mask) {
