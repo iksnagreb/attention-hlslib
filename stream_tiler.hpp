@@ -8,6 +8,9 @@
 
 // Slicing of bit vectors
 #include "interpret.hpp"
+// Auxiliary structures for adding bind_storage pragmas to variables via C++
+// template parameters
+#include "bind_storage.hpp"
 // Swizzle (transpose) of bit vectors
 #include "swizzle.hpp"
 
@@ -118,7 +121,9 @@ template<
     // Number of grouped input elements, i.e. input parallelism
     std::size_t GroupSize,
     // Number of input groups making up a tile
-    std::size_t NumGroups
+    std::size_t NumGroups,
+    // Memory resource to be used for implementing the internal buffers
+    class MemResource = Resource::AUTO
 >
 // @formatter:on
     struct StreamTiler {
@@ -129,7 +134,7 @@ template<
         using Chunk = ap_uint<Elem::width * GroupSize>;
 
         // Output data stream of ordered matrix tiles
-        hls::stream<Tile> out;
+        BindStorage<hls::stream<Tile>, Storage::FIFO, MemResource> out;
 
         // Produces a tile stream with NumGroups x GroupSize layout (GroupSize
         // dimension is innermost) if NOT transposed=true
@@ -144,22 +149,24 @@ template<
         //      Each tile will have layout like: | 1111 2222 3333 |
         explicit StreamTiler(
             hls::stream<Chunk> &in, const std::size_t rep = 1) {
+// Set depth of the output tile stream to fit the entire input stream length
+#pragma HLS stream variable=out.var depth=rep * TileRows * TileCols
 // Allow functions and loops to overlap in the following
 #pragma HLS dataflow
-            // Completely buffer the whole input matrix organized as tiles
-            // @formatter:off
-            Tile buffer[TileRows][TileCols]; read2buffer(in, buffer);
-            // @formatter:on
-
-// Set depth of the tile stream to fit the entire input stream length
-#pragma HLS stream variable=out depth=rep * TileRows * TileCols
-
+            // Buffer holding the complete matrix organized into
+            // TileRows x TileCols Tiles
+            BindStorage<Buffer, Storage::RAM_S2P, MemResource> buffer;
+            // Read from the input stream (not tiled) to filled the tiled matrix
+            // buffer, i.e., needs multiple cycles to fill up each tile
+            read2buffer(in, buffer);
             // Iterate tile indices according to the specified output order
             OOrder<TileRows, TileCols, 1> o_index;
             // Repeatedly iterate over all tiles
             for(std::size_t i = 0; i < rep * TileRows * TileCols; ++i) {
+// Pipeline the steps of this loop
+#pragma HLS pipeline II=1 style=flp
                 // Send the next tile into the output stream
-                out.write(maybe_transpose(buffer[o_index.tr][o_index.tc]));
+                out.var.write(maybe_transpose(buffer[o_index.tr][o_index.tc]));
                 // Next tile index
                 o_index.next();
             }
@@ -169,6 +176,8 @@ template<
         // If specified via template arguments, this transposes a tile. If not,
         // this will simply pass through the input.
         static Tile maybe_transpose(const Tile &tile) {
+// Inline this small piece of bit handling logic
+#pragma HLS INLINE
             // Transpose flag is set as template argument, this should be a
             // constexpr and might be optimized away (does HLS work this way?)
             if(Transpose) {
@@ -193,6 +202,8 @@ template<
             // It takes N cycles to see all chunks of a tile and there are in
             // total TileRows x TileCols tiles to complete the matrix
             for(std::size_t i = 0; i < NumGroups * TileRows * TileCols; ++i) {
+// Pipeline the steps of this loop
+#pragma HLS pipeline II=1 style=flp
                 // Current chunk index within a tile
                 std::size_t n = i_index.n;
                 // Reference to the tile to be filled next
@@ -207,43 +218,121 @@ template<
     };
 
 // StreamTiler receiving and producing in column-major order
-template<class Type, std::size_t... Sizes>
+template<
+    // Datatype of each individual elements
+    class Type,
+    // Number of tile rows on the right hand side
+    std::size_t TileRows,
+    // Number of tile cols on the right hand side
+    std::size_t TileCols,
+    // Number of grouped input elements, i.e. input parallelism
+    std::size_t GroupSize,
+    // Number of input groups making up a tile
+    std::size_t NumGroups,
+    // Memory resource to be used for implementing the internal buffers
+    class MemResource = Resource::AUTO
+>
     using Col2ColStreamTiler = StreamTiler<
-        ColMajor, ColMajor, Type, /*Transpose=*/false, Sizes...
+        ColMajor, ColMajor, Type, /*Transpose=*/false,
+        TileRows, TileCols, GroupSize, NumGroups, MemResource
     >;
 
 // StreamTiler receiving in row-major order and producing in column-major order
-template<class Type, std::size_t... Sizes>
+template<
+    // Datatype of each individual elements
+    class Type,
+    // Number of tile rows on the right hand side
+    std::size_t TileRows,
+    // Number of tile cols on the right hand side
+    std::size_t TileCols,
+    // Number of grouped input elements, i.e. input parallelism
+    std::size_t GroupSize,
+    // Number of input groups making up a tile
+    std::size_t NumGroups,
+    // Memory resource to be used for implementing the internal buffers
+    class MemResource = Resource::AUTO
+>
     using Row2ColStreamTiler = StreamTiler<
         // Changing the order requires transposing each tile, i.e. change the
         // order of the tile as well, not just the order of tiles
-        RowMajor, ColMajor, Type, /*Transpose=*/true, Sizes...
+        RowMajor, ColMajor, Type, /*Transpose=*/true,
+        TileRows, TileCols, GroupSize, NumGroups, MemResource
     >;
 
 // StreamTiler receiving and producing in row-major order
-template<class Type, std::size_t... Sizes>
+template<
+    // Datatype of each individual elements
+    class Type,
+    // Number of tile rows on the right hand side
+    std::size_t TileRows,
+    // Number of tile cols on the right hand side
+    std::size_t TileCols,
+    // Number of grouped input elements, i.e. input parallelism
+    std::size_t GroupSize,
+    // Number of input groups making up a tile
+    std::size_t NumGroups,
+    // Memory resource to be used for implementing the internal buffers
+    class MemResource = Resource::AUTO
+>
     using Row2RowStreamTiler = StreamTiler<
-        RowMajor, RowMajor, Type, /*Transpose=*/false, Sizes...
+        RowMajor, RowMajor, Type, /*Transpose=*/false,
+        TileRows, TileCols, GroupSize, NumGroups, MemResource
     >;
 
 // StreamTiler receiving in column-major order and producing in row-major order
-template<class Type, std::size_t... Sizes>
+template<
+    // Datatype of each individual elements
+    class Type,
+    // Number of tile rows on the right hand side
+    std::size_t TileRows,
+    // Number of tile cols on the right hand side
+    std::size_t TileCols,
+    // Number of grouped input elements, i.e. input parallelism
+    std::size_t GroupSize,
+    // Number of input groups making up a tile
+    std::size_t NumGroups,
+    // Memory resource to be used for implementing the internal buffers
+    class MemResource = Resource::AUTO
+>
     using Col2RowStreamTiler = StreamTiler<
         // Changing the order requires transposing each tile, i.e. change the
         // order of the tile as well, not just the order of tiles
-        ColMajor, RowMajor, Type, /*Transpose=*/true, Sizes...
+        ColMajor, RowMajor, Type, /*Transpose=*/true,
+        TileRows, TileCols, GroupSize, NumGroups, MemResource
     >;
 
 // Adapts a stream of chunks from row-major to column-major order
 //  Note: Does not really create tiles, merely buffers all chunks to change the
 //  order.
-template<class Type, std::size_t TileRows, std::size_t TileCols>
-    using Row2ColAdapter = Row2ColStreamTiler<Type, TileRows, TileCols, 1, 1>;
+template<
+    // Datatype of each individual elements
+    class Type,
+    // Number of tile rows on the right hand side
+    std::size_t TileRows,
+    // Number of tile cols on the right hand side
+    std::size_t TileCols,
+    // Memory resource to be used for implementing the internal buffers
+    class MemResource = Resource::AUTO
+>
+    using Row2ColAdapter = Row2ColStreamTiler<
+        Type, TileRows, TileCols, 1, 1, MemResource
+    >;
 
 // Adapts a stream of chunks from column-major to row-major order
 //  Note: Does not really create tiles, merely buffers all chunks to change the
 //  order.
-template<class Type, std::size_t TileRows, std::size_t TileCols>
-    using Col2RowAdapter = Col2RowStreamTiler<Type, TileRows, TileCols, 1, 1>;
+template<
+    // Datatype of each individual elements
+    class Type,
+    // Number of tile rows on the right hand side
+    std::size_t TileRows,
+    // Number of tile cols on the right hand side
+    std::size_t TileCols,
+    // Memory resource to be used for implementing the internal buffers
+    class MemResource = Resource::AUTO
+>
+    using Col2RowAdapter = Col2RowStreamTiler<
+        Type, TileRows, TileCols, 1, 1, MemResource
+    >;
 
 #endif // STREAM_TILER_HPP

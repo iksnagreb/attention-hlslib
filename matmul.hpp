@@ -68,7 +68,9 @@ template<
     //  Note: Defaults to fit MAC along the common dimension without overflows
     class OutElem = typename MACInfo<TileRows * TH, LhsElem, RhsElem>::AccType,
     // Type of activation function to use
-    class Activation = PassThroughActivation<AccElem>
+    class Activation = PassThroughActivation<AccElem>,
+    // Resource type for the hardware implementation of the MAC block
+    class ResourceType = ap_resource_dflt
 >
     struct MatMul {
 //        // Test whether the activation-type combination is valid
@@ -101,19 +103,27 @@ template<
         //  default constructor, i.e. no argument, as well.
         explicit MatMul(const Activation &activation = {})
             : activation{activation} {
-
         }
 
         // Multiplies the left hand side and the right hand side matrices
         // provided as streams producing an output stream
-        void operator() (
+        void operator()(
             LhsStream &lhs, RhsStream &rhs, OutStream &out, std::size_t len) {
             // Buffer a complete row of the left hand side in TH parallel chunks
             LhsChunk lhs_buffer[TileRows];
+// Completely partition the left hand side row array along all dimensions to
+// avoid conflicts when accessing all in parallel
+#pragma HLS ARRAY_PARTITION variable=lhs_buffer complete dim=0
             // Accumulator of TW parallel chunks
             AccElem acc[TW];
+// Completely partition the accumulator array along all dimensions to avoid
+// conflicts when accessing all in parallel
+#pragma HLS ARRAY_PARTITION variable=acc complete dim=0
             // Activations of TW parallel chunks
             OutElem act[TW];
+// Completely partition the activations array along all dimensions to avoid
+// conflicts when accessing all in parallel
+#pragma HLS ARRAY_PARTITION variable=act complete dim=0
 
             // Actual loop variables mapping to the tile row index (tr) and tile
             // column index (tc)
@@ -134,7 +144,7 @@ template<
                     // the buffer for reuse
                     lhs_buffer[tr] = lhs_chunk = lhs.read();
                 }
-                // Still processing from the same row of input
+                    // Still processing from the same row of input
                 else {
                     // The next chunk of the left hand side is already buffered
                     lhs_chunk = lhs_buffer[tr];
@@ -169,13 +179,15 @@ template<
 
                     // Each of the processing elements receives TH parallel
                     // input elements
-                    // TODO: Maybe adapt to mac/mul implementation
                     for(std::size_t simd = 0; simd < TH; ++simd) {
 // Process all input elements in parallel
 #pragma HLS UNROLL
                         // Compute partial MAC to the accumulator
-                        // TODO: Add resource type specification
-                        acc[pe] += lhs_sliced(simd, 0) * rhs_sliced(simd, 0);
+                        acc[pe] += mul(
+                            lhs_sliced(simd, 0),
+                            rhs_sliced(simd, 0),
+                            ResourceType{}
+                        );
                     }
                 }
 

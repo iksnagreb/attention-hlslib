@@ -13,6 +13,8 @@
 //  Note: This un-swizzles as well: Flip SIMD and PE to invert the operation
 template<unsigned SIMD, unsigned PE, int Width>
     ap_uint<Width> swizzle(const ap_uint<Width> &in) {
+// Inline this small piece of bit moving logic
+#pragma HLS INLINE
         // The width must at least be divisible by both, SIMD and PE
         //  Note: This will catch some rather obvious logic errors, but
         //  unfortunately not subtle things like confusing SIMD and PE.

@@ -6,6 +6,9 @@
 // HLS arbitrary precision types: ap_uint class template
 #include <ap_int.h>
 
+// Auxiliary structures for adding bind_storage pragmas to variables via C++
+// template parameters
+#include "bind_storage.hpp"
 // Tiling of streamed matrices
 #include "stream_tiler.hpp"
 // Stream matrix-matrix multiplication
@@ -105,7 +108,14 @@ template<
 
     // Activation function type of the softmax normalization of the attention
     // weights
-    class ActASoftmax = PassThroughActivation<OutQKMatMul>
+    class ActASoftmax = PassThroughActivation<OutQKMatMul>,
+
+    // Resource type for the hardware implementation of the MAC blocks inside
+    // the two MatMul operations
+    class MacResource = ap_resource_lut,
+    // Resource type for the hardware implementation of the memories inside the
+    // two StreamTiler instances
+    class MemResource = Resource::AUTO
 >
     struct ScaledDotProductAttention {
         // Tests whether the given folding is a valid configuration with respect
@@ -129,14 +139,14 @@ template<
         // are required in column-major order for multiplication as well.
         using KTiler = Col2ColStreamTiler<
             // Note: Embeddings along columns, Sequence along rows
-            KType, EmbFold, SeqFold, I_ELEMS, S_ELEMS
+            KType, EmbFold, SeqFold, I_ELEMS, S_ELEMS, MemResource
         >;
 
         // Value matrix stream tiling: Values arrive in row-major order but
         // tiles are required in column-major order for multiplication.
         using VTiler = Row2ColStreamTiler<
             // Note: Sequence along columns, Embeddings along rows
-            VType, SeqFold, EmbFold, O_ELEMS, S_ELEMS
+            VType, SeqFold, EmbFold, O_ELEMS, S_ELEMS, MemResource
         >;
 
         // MatMul instance configured to do the Query x Key multiplication
@@ -150,7 +160,10 @@ template<
             // types are inferred here, everything can be specified above.
             //  Note: These are elementwise types. Accumulators, outputs and
             //  activations can (and should be) different from the AVMatMul.
-            QType, KType, AccQKMatMul, OutQKMatMul, ActQKMatMul
+            QType, KType, AccQKMatMul, OutQKMatMul, ActQKMatMul,
+            // Forward the resource type to select the hardware implementation
+            // of MAC operations
+            MacResource
         >;
 
         // MatMul instance configured to do the Attention x Value multiplication
@@ -164,7 +177,10 @@ template<
             // types are inferred here, everything can be specified above.
             //  Note: These are elementwise types. Accumulators, outputs and
             //  activations can (and should be) different from the QKMatMul.
-            AType, VType, AccAVMatMul, OutAVMatMul, ActAVMatMul
+            AType, VType, AccAVMatMul, OutAVMatMul, ActAVMatMul,
+            // Forward the resource type to select the hardware implementation
+            // of MAC operations
+            MacResource
         >;
 
         // Short names for Input/Output/Internal streams of parallel elements:
@@ -225,10 +241,6 @@ template<
                 KTiler k_tiles(k, QLen);
                 // Tiling of the streamed value matrix
                 VTiler v_tiles(v, QLen);
-// Set depth of the output stream to fit the entire output length
-#pragma HLS stream variable=k_tiles.out depth=QLen * SeqFold * EmbFold
-// Set depth of the output stream to fit the entire output length
-#pragma HLS stream variable=v_tiles.out depth=QLen * SeqFold * EmbFold
 
                 // Multiply the query to the tiled key stream feeding some
                 // internal stream connecting to the attention-weights
@@ -248,8 +260,6 @@ template<
                 // Multiply the normalized attention weights to the tiled value
                 // stream directly feeding the output stream.
                 av_matmul(softmax_out, v_tiles.out, out, QLen);
-// Set depth of the output stream to fit the entire output length
-#pragma HLS stream variable=out depth=QLen * EmbFold
             }
 
         // No masking version of the attention operator

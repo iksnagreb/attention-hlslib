@@ -213,6 +213,10 @@ template<
                     // first loop iteration
                     State state;
                     Value value;
+// Completely partition the value arrays along all dimensions to avoid conflicts
+// when accessing all in parallel
+#pragma HLS ARRAY_PARTITION variable=value.ix complete dim=0
+#pragma HLS ARRAY_PARTITION variable=value.ex complete dim=0
 
                     // Current maximum value per row
                     IType max_value = min<IType>;
@@ -229,11 +233,11 @@ template<
                             max_value = max_buffer.read();
                         }
                         // Read and slice the next group from the input stream
-                        auto buffer = Slice<IType>{}(tmp.read());
+                        const auto buffer = Slice<IType>{}(tmp.read());
                         // Get the attention mask bits corresponding to this
                         // group. This might be "Void", depending on the mask
                         // type.
-                        auto mask_bits = maybe_mask(mask, i);
+                        const auto mask_bits = maybe_mask(mask, i);
 
                         // Process the GroupSize elements in parallel
                         for(std::size_t pe = 0; pe < GroupSize; ++pe) {
@@ -293,6 +297,10 @@ template<
                     // loop iteration
                     State state;
                     Value value;
+// Completely partition the value arrays along all dimensions to avoid conflicts
+// when accessing all in parallel
+#pragma HLS ARRAY_PARTITION variable=value.ix complete dim=0
+#pragma HLS ARRAY_PARTITION variable=value.ex complete dim=0
 
                     // Denominator shared by whole feature map
                     float den;
@@ -318,6 +326,9 @@ template<
 
                         // Buffer collecting GroupSize elements
                         OType buffer[GroupSize];
+// Completely partition the output buffer arrays along the first dimension to
+// avoid conflicts when accessing all in parallel
+#pragma HLS ARRAY_PARTITION variable=buffer complete dim=0
 
                         // Process the GroupSize elements in parallel
                         for(std::size_t pe = 0; pe < GroupSize; ++pe) {
