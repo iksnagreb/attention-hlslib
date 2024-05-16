@@ -150,7 +150,7 @@ template<
         explicit StreamTiler(
             hls::stream<Chunk> &in, const std::size_t rep = 1) {
 // Set depth of the output tile stream to fit the entire input stream length
-#pragma HLS stream variable=out.var depth=rep * TileRows * TileCols
+#pragma HLS stream variable=out.var depth=TileRows * TileCols
 // Allow functions and loops to overlap in the following
 #pragma HLS dataflow
             // Buffer holding the complete matrix organized into

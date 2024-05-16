@@ -248,14 +248,20 @@ template<
                 typename QKMatMul::OutStream qk_out;
                 qk_matmul(q, k_tiles.out, qk_out, QLen);
 // Set depth of the output stream to fit the entire output length
-#pragma HLS stream variable=qk_out depth=QLen * SeqFold
+#pragma HLS stream variable=qk_out depth=SeqFold
+// Implement this FIFO buffer in distributed memory using shift register lookup
+// tables
+#pragma HLS BIND_STORAGE variable=qk_out type=FIFO impl=SRL
 
                 // Normalize the attention weights via softmax feeding some
                 // internal stream connecting to the attention-values matmul.
                 AStream softmax_out;
                 softmax(qk_out, softmax_out, mask);
 // Set depth of the output stream to fit the entire output length
-#pragma HLS stream variable=softmax_out depth=QLen * SeqFold
+#pragma HLS stream variable=softmax_out depth=SeqFold
+// Implement this FIFO buffer in distributed memory using shift register lookup
+// tables
+#pragma HLS BIND_STORAGE variable=softmax_out type=FIFO impl=SRL
 
                 // Multiply the normalized attention weights to the tiled value
                 // stream directly feeding the output stream.

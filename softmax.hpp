@@ -123,12 +123,18 @@ template<
                 // i.e., to prevent overflow of std::exp.
                 hls::stream<IType> max_buffer;
 // This buffer needs to hold one state per repetition, i.e., per row
-#pragma HLS stream variable=max_buffer depth=NumRows
+#pragma HLS stream variable=max_buffer depth=2
+// Implement this FIFO buffer in distributed memory using shift register lookup
+// tables
+#pragma HLS BIND_STORAGE variable=max_buffer type=FIFO impl=SRL
 
                 // Copy of the inputs after searching for the maximum
                 IStream tmp;
 // This buffer needs to hold one copy per group of elements
-#pragma HLS stream variable=tmp depth=NumRows * NumGroups
+#pragma HLS stream variable=tmp depth=NumGroups
+// Implement this FIFO buffer in distributed memory using shift register lookup
+// tables
+#pragma HLS BIND_STORAGE variable=tmp type=FIFO impl=SRL
 
                 // Scope of the zero loop to have simple short names for locals
                 {
@@ -200,12 +206,18 @@ template<
                 // State buffer between the two loops
                 hls::stream<State> state_buffer;
 // This buffer needs to hold one state per repetition, i.e., per row
-#pragma HLS stream variable=state_buffer depth=NumRows
+#pragma HLS stream variable=state_buffer depth=2
+// Implement this FIFO buffer in distributed memory using shift register lookup
+// tables
+#pragma HLS BIND_STORAGE variable=state_buffer type=FIFO impl=SRL
 
                 // Value buffer between the two loops
                 hls::stream<Value> value_buffer;
 // This buffer needs to hold one value pack per group of elements
-#pragma HLS stream variable=value_buffer depth=NumRows * NumGroups
+#pragma HLS stream variable=value_buffer depth=NumGroups
+// Implement this FIFO buffer in distributed memory using shift register lookup
+// tables
+#pragma HLS BIND_STORAGE variable=value_buffer type=FIFO impl=SRL
 
                 // Scope of the first loop to have simple short names for locals
                 {
