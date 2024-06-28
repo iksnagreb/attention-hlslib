@@ -136,6 +136,14 @@ template<
 // tables
 #pragma HLS BIND_STORAGE variable=tmp type=FIFO impl=SRL
 
+                // Copy of the mask values after searching for the maximum
+                hls::stream<decltype(maybe_mask(mask, 0))> _mask;
+// This buffer needs to hold one copy per group of elements
+#pragma HLS stream variable=_mask depth=NumGroups
+// Implement this FIFO buffer in distributed memory using shift register lookup
+// tables
+#pragma HLS BIND_STORAGE variable=_mask type=FIFO impl=SRL
+
                 // Scope of the zero loop to have simple short names for locals
                 {
                     // Track the current maximum value
@@ -152,25 +160,28 @@ template<
                         tmp.write(next);
                         // Slice the next group from the input stream
                         const auto buffer = Slice<IType>{}(next);
+                        // Get the attention mask bits corresponding to this
+                        // group. This might be "Void", depending on the mask
+                        // type.
+                        const auto mask_bits = maybe_mask(mask, i);
+                        // Send the (optional) mask bits to the next stage
+                        _mask.write(mask_bits);
 
                         // Process the GroupSize elements in parallel
                         for(std::size_t pe = 0; pe < GroupSize; ++pe) {
 // Inner loop should be unrolled
 #pragma HLS UNROLL
-                            // Note: No masking of the input here. If the
-                            // maximum is in a location which is masked later,
-                            // we probably lose some precision, but this should
-                            // not be too bad.
-                            // TODO: Actually validate this claim...
-
                             // Single element from the input stream
                             IType x = buffer(pe, 0);
-                            // If the new value is larger than the current
-                            // maximum, update the maximum
-                            if(x > max_value) {
-                                // Only remember the value, we do not care for
-                                // the location here
-                                max_value = x;
+                            // Optionally allows for masked attention
+                            if(!is_masked(mask, mask_bits, i, pe)) {
+                                // If the new value is larger than the current
+                                // maximum, update the maximum
+                                if(x > max_value) {
+                                    // Only remember the value, we do not care
+                                    // for the location here
+                                    max_value = x;
+                                }
                             }
                         }
 
@@ -249,7 +260,7 @@ template<
                         // Get the attention mask bits corresponding to this
                         // group. This might be "Void", depending on the mask
                         // type.
-                        const auto mask_bits = maybe_mask(mask, i);
+                        const auto mask_bits = _mask.read();
 
                         // Process the GroupSize elements in parallel
                         for(std::size_t pe = 0; pe < GroupSize; ++pe) {
