@@ -119,19 +119,19 @@ template<class Type>
         // at function scope. The constructor is closest we can get to "the body
         // of the function where the variable is defined" according to UG1399.
         BindStorage() {
-// Set the pragma for the storage to be implemented as a FIFO where  Vitis HLS
+// Set the pragma for the storage to be implemented as a FIFO where Vitis HLS
 // decides whether to implement as LUTRAM, BRAM, URAM or SRL
 #pragma HLS bind_storage variable=var type=FIFO impl=AUTO
         }
 
         // Implicit conversion to a reference of the underlying storage object
-        // of Type: This should make BinsStorage behave *almost* as Type
+        // of Type: This should make BindStorage behave *almost* as Type
         operator Type &() {  // NOLINT: Intentionally implicit
             return var;
         }
 
         // Implicit conversion to a reference of the underlying storage object
-        // of Type: This should make BinsStorage behave *almost* as Type
+        // of Type: This should make BindStorage behave *almost* as Type
         operator const Type &() const {  // NOLINT: Intentionally implicit
             return var;
         }
