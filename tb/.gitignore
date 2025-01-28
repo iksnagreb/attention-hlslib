@@ -1,4 +1,0 @@
-# Logfile of running Vitis simulation and/or synthesis
-vitis_hls.log
-# Vitits project directories of testbenches
-tb_*/
