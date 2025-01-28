@@ -365,7 +365,7 @@ template<
                         }
 
                         // Feed the output stream with flattened buffer
-                        out.write(flatten<GroupSize>(buffer));
+                        out.write(flatten(buffer));
                     }
                 }
             }

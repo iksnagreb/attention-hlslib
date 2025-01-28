@@ -214,7 +214,7 @@ template<
 
                     // Flatten the activations output along the tile width, i.e.
                     // parallel output elements (PE), and send to output stream
-                    out.write(flatten<TW>(act));
+                    out.write(flatten(act));
                     // Advance to the next parallel output chunk, i.e. tile
                     // column
                     ++tc;
