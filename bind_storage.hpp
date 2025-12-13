@@ -1,145 +1,68 @@
-#ifndef ATTENTION_HLSLIB_BIND_STORAGE_HPP
-#define ATTENTION_HLSLIB_BIND_STORAGE_HPP
+#ifndef BIND_STORAGE_HPP
+#define BIND_STORAGE_HPP
 
-// Namespace to organize resource implementation options
-//  See UG1399 for details
-namespace Resource {
-// Tag type for selecting distributed RAM based implementation of storage
-//  Corresponds to impl=LUTRAM on bind_storage pragma, see UG1399
-struct LUTRAM {
+// Storage resource implementation options according to UG1399
+enum Resource {
+    LUTRAM, BRAM, URAM, SRL, AUTO, MEMORY
 };
 
-// Tag type for selecting block RAM based implementation of storage
-//  Corresponds to impl=BRAM on bind_storage pragma, see UG1399
-struct BRAM {
+// Storage type options according to UG1399
+enum Storage {
+    FIFO, RAM_1P, RAM_1WNR, RAM_2P, RAM_S2P, RAM_T2P, ROM_1P, ROM_2P, ROM_NP
 };
 
-// Tag type for selecting block RAM based implementation of storage
-//  Corresponds to impl=URAM on bind_storage pragma, see UG1399
-struct URAM {
-};
-
-// Tag type for selecting shift register logic based implementation of storage
-//  Corresponds to impl=SRL on bind_storage pragma, see UG1399
-struct SRL {
-};
-
-// Tag type for selecting implementation of storage automatically by Vitis
-//  Corresponds to impl=AUTO on bind_storage pragma, see UG1399
-struct AUTO {
-};
-
-// Tage type selecting implementation to be selected by Vivado
-//  Corresponds to impl=MEMORY on bind_storage pragma, see UG1399
-struct MEMORY {
-};
-}
-
-// Namespace to organize storage type options
-//  See UG1399 for details
-namespace Storage {
-// Tag type selecting a FIFO storage
-struct FIFO {
-};
-
-// Tag type selecting a single-port RAM storage
-struct RAM_1P {
-};
-
-// Tag type selecting a RAM with 1 write port and N read ports, using N banks
-// internally
-struct RAM_1WNR {
-};
-
-// Tag type selecting a dual-port RAM that allows read operations on one port
-// and both read and write operations on the other port.
-struct RAM_2P {
-};
-
-// Tag type selecting a dual-port RAM that allows read operations on one port
-// and write operations on the other port.
-struct RAM_S2P {
-};
-
-// Tag type selecting a true dual-port RAM with support for both read and write
-// on both ports.
-struct RAM_T2P {
-};
-
-// Tag type selecting a single-port ROM
-struct ROM_1P {
-};
-
-// Tag type selecting a dual-port ROM
-struct ROM_2P {
-};
-
-// Tag type selecting a multi-port ROM
-struct ROM_NP {
-};
-}
-
-// Adds bind_storage pragmas to a variable declaration of Type, depending on
-// template argument for selecting the resource type the storage should be bound
-// to.
-template<class Type, class Storage, class Resource>
+// Auxiliary type for adding bind_storage directives to a variable of generic
+// type. This auxiliary helps with partial specialization/instantiation of the
+// template via the following macro. Use the bind_storage interface function
+// template below.
+template<Storage Storage, Resource Resource>
     struct BindStorage;
 
-// Utility for converting macro arguments to macro strings
+// Utility for converting macro arguments to macro strings used to assemble the
+// HLS pragma from its constituents
 #define STRINGIFY(a) #a
 
-// Macro for generating template specializations of BindStorage
+// Macro for generating template specializations of BindStorage, creating a
+// static interface with generic Type which can be applied to a variable.
 #define BIND_STORAGE(STORAGE, RESOURCE) \
-    template<class Type>                                                       \
-        struct BindStorage<Type, Storage::STORAGE, Resource::RESOURCE> {       \
-            Type var;                                                          \
-            BindStorage() {                                                    \
+    template<>                                                                 \
+        struct BindStorage<Storage::STORAGE, Resource::RESOURCE> {             \
+            template<class Type>                                               \
+                constexpr static void bind_storage(Type &&var) {               \
 _Pragma(STRINGIFY(HLS bind_storage variable=var type=STORAGE impl=RESOURCE))   \
-            }                                                                  \
-            operator Type &() {                                                \
-                return var;                                                    \
-            }                                                                  \
-            operator const Type &() const {                                    \
-                return var;                                                    \
-            }                                                                  \
-        }
+                }                                                              \
+        };
 
 // The above macro effectively expands to the following class template
 // specialization, for example to specify an AUTO FIFO storage:
 
 // Specialization binding the storage of Type to be implemented as a FIFO where
 // Vitis HLS decides whether to implement as LUTRAM, BRAM, URAM or SRL
-template<class Type>
-    struct BindStorage<Type, Storage::FIFO, Resource::AUTO> {
-        // Wrap an object of the specified Type as a publicly exposed member of
-        // the struct
-        Type var;
-
-        // Constructor is used to apply the pragma, as HLS pragmas may only be
-        // at function scope. The constructor is closest we can get to "the body
-        // of the function where the variable is defined" according to UG1399.
-        BindStorage() {
-// Set the pragma for the storage to be implemented as a FIFO where Vitis HLS
-// decides whether to implement as LUTRAM, BRAM, URAM or SRL
+template<>
+    struct BindStorage<Storage::FIFO, Resource::AUTO> {
+        // Static interface is used to apply the pragma, as HLS pragmas may only
+        // be at function scope. The interface is generic with respect to the
+        // type and value category of the variable which the directive should be
+        // applied to.
+        template<class Type>
+            constexpr static void bind_storage(Type &&var) {
+            // Directive for the storage to be implemented as a FIFO where Vitis
+            // HLS decides whether to implement as LUTRAM, BRAM, URAM or SRL
 #pragma HLS bind_storage variable=var type=FIFO impl=AUTO
-        }
-
-        // Implicit conversion to a reference of the underlying storage object
-        // of Type: This should make BindStorage behave *almost* as Type
-        operator Type &() {  // NOLINT: Intentionally implicit
-            return var;
-        }
-
-        // Implicit conversion to a reference of the underlying storage object
-        // of Type: This should make BindStorage behave *almost* as Type
-        operator const Type &() const {  // NOLINT: Intentionally implicit
-            return var;
         }
     };
 
+// Interface to be used for selecting and inserting bind_storage directives via
+// template metaprogramming. Type can be inferred from the input.
+template<Storage Storage, Resource Resource, class Type>
+    constexpr void bind_storage(Type &&var) {
+        BindStorage<Storage, Resource>::bind_storage(var);
+    }
+
+
 // Generate all BindStorage specializations for FIFOs with all allowed
 // implementations according to UG1399
-//BIND_STORAGE(FIFO, AUTO); // Manually specified as example above
+// BIND_STORAGE(FIFO, AUTO); // Manually specified as example above
 BIND_STORAGE(FIFO, BRAM);
 BIND_STORAGE(FIFO, LUTRAM);
 BIND_STORAGE(FIFO, URAM);
@@ -177,7 +100,7 @@ BIND_STORAGE(RAM_S2P, URAM);
 // implementations according to UG1399
 BIND_STORAGE(RAM_T2P, AUTO);
 BIND_STORAGE(RAM_T2P, BRAM);
-//BIND_STORAGE(RAM_T2P, LUTRAM);
+// BIND_STORAGE(RAM_T2P, LUTRAM); // TODO: Not available for some devices?
 BIND_STORAGE(RAM_T2P, URAM);
 
 // Generate all BindStorage specializations for ROM_1P with all allowed
@@ -185,20 +108,20 @@ BIND_STORAGE(RAM_T2P, URAM);
 BIND_STORAGE(ROM_1P, AUTO);
 BIND_STORAGE(ROM_1P, BRAM);
 BIND_STORAGE(ROM_1P, LUTRAM);
-//BIND_STORAGE(ROM_1P, URAM);
+// BIND_STORAGE(ROM_1P, URAM);    // TODO: Not available for some devices?
 
 // Generate all BindStorage specializations for ROM_2P with all allowed
 // implementations according to UG1399
 BIND_STORAGE(ROM_2P, AUTO);
 BIND_STORAGE(ROM_2P, BRAM);
 BIND_STORAGE(ROM_2P, LUTRAM);
-//BIND_STORAGE(ROM_2P, URAM);
+// BIND_STORAGE(ROM_2P, URAM);    // TODO: Not available for some devices?
 
 // Generate all BindStorage specializations for ROM_NP with all allowed
 // implementations according to UG1399
 BIND_STORAGE(ROM_NP, AUTO);
 BIND_STORAGE(ROM_NP, BRAM);
 BIND_STORAGE(ROM_NP, LUTRAM);
-//BIND_STORAGE(ROM_NP, URAM);
+// BIND_STORAGE(ROM_NP, URAM);    // TODO: Not available for some devices?
 
-#endif //ATTENTION_HLSLIB_BIND_STORAGE_HPP
+#endif // BIND_STORAGE_HPP

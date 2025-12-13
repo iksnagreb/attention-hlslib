@@ -134,7 +134,7 @@ template<
         using Chunk = ap_uint<Elem::width * GroupSize>;
 
         // Output data stream of ordered matrix tiles
-        BindStorage<hls::stream<Tile>, Storage::FIFO, MemResource> out;
+		hls::stream<Tile> out; bind_storage<FIFO, MemResource>(out);
 
         // Produces a tile stream with NumGroups x GroupSize layout (GroupSize
         // dimension is innermost) if NOT transposed=true
@@ -155,7 +155,7 @@ template<
 #pragma HLS dataflow
             // Buffer holding the complete matrix organized into
             // TileRows x TileCols Tiles
-            BindStorage<Buffer, Storage::RAM_S2P, MemResource> buffer;
+			Buffer buffer; bind_storage<RAM_S2P, MemResource>(buffer);
             // Read from the input stream (not tiled) to filled the tiled matrix
             // buffer, i.e., needs multiple cycles to fill up each tile
             read2buffer(in, buffer);
