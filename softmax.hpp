@@ -295,7 +295,7 @@ template<
                                 // Accumulate the exponential for normalizing in
                                 // the next loop. Convert from float to integer
                                 // to optimize the latency.
-                                state.total += ZType{std::round(ex * scale)};
+                                state.total += round_to_z(ex * scale);
                             }
                         }
 
@@ -370,9 +370,21 @@ template<
                 }
             }
 
+    private:
+        // Rounds a scaled exponential to the integer accumulation format
+        //  Note: Must be inlined including the std::round, as HLS cannot
+        //  implement a loop with sub-function calls as a flushable pipeline and
+        //  silently falls back to a stalling pipeline. The stalling pipeline
+        //  deadlocks the softmax: Once the value buffer is filled by one row,
+        //  the next row stalls the pipeline before the state write, which is
+        //  scheduled a few stages after the value write, ever completes.
+        static ZType round_to_z(const float x) {
+#pragma HLS INLINE recursive
+            return ZType{std::round(x)};
+        }
+
         // Implementation details of masked attention, mostly tag dispatching
         // depending on the mask type to unify the interface above.
-    private:
         // None mask does not manifest as a real mask object
         [[maybe_unused]] auto maybe_mask(attention::mask::None, std::size_t) {
             // Local dummy type serving as "void"
