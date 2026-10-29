@@ -115,7 +115,7 @@ template<
     class MacResource = ap_resource_lut,
     // Resource type for the hardware implementation of the memories inside the
     // two StreamTiler instances
-    class MemResource = Resource::AUTO
+    Resource MemResource = Resource::AUTO
 >
     struct ScaledDotProductAttention {
         // Tests whether the given folding is a valid configuration with respect
