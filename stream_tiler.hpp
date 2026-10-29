@@ -123,7 +123,7 @@ template<
     // Number of input groups making up a tile
     std::size_t NumGroups,
     // Memory resource to be used for implementing the internal buffers
-    class MemResource = Resource::AUTO
+    Resource MemResource = Resource::AUTO
 >
 // @formatter:on
     struct StreamTiler {
@@ -134,7 +134,9 @@ template<
         using Chunk = ap_uint<Elem::width * GroupSize>;
 
         // Output data stream of ordered matrix tiles
-		hls::stream<Tile> out; bind_storage<FIFO, MemResource>(out);
+        //  Note: The storage is bound in the constructor, as HLS pragmas may
+        //  only be at function scope.
+        hls::stream<Tile> out;
 
         // Produces a tile stream with NumGroups x GroupSize layout (GroupSize
         // dimension is innermost) if NOT transposed=true
@@ -150,12 +152,15 @@ template<
         explicit StreamTiler(
             hls::stream<Chunk> &in, const std::size_t rep = 1) {
 // Set depth of the output tile stream to fit the entire input stream length
-#pragma HLS stream variable=out.var depth=TileRows * TileCols
+#pragma HLS stream variable=out depth=TileRows * TileCols
 // Allow functions and loops to overlap in the following
 #pragma HLS dataflow
+            // Implement the output tile stream on the selected memory resource
+            bind_storage<FIFO, MemResource>(out);
             // Buffer holding the complete matrix organized into
             // TileRows x TileCols Tiles
-			Buffer buffer; bind_storage<RAM_S2P, MemResource>(buffer);
+            Buffer buffer;
+            bind_storage<RAM_S2P, MemResource>(buffer);
             // Read from the input stream (not tiled) to filled the tiled matrix
             // buffer, i.e., needs multiple cycles to fill up each tile
             read2buffer(in, buffer);
@@ -166,7 +171,7 @@ template<
 // Pipeline the steps of this loop
 #pragma HLS pipeline II=1 style=flp
                 // Send the next tile into the output stream
-                out.var.write(maybe_transpose(buffer[o_index.tr][o_index.tc]));
+                out.write(maybe_transpose(buffer[o_index.tr][o_index.tc]));
                 // Next tile index
                 o_index.next();
             }
@@ -230,7 +235,7 @@ template<
     // Number of input groups making up a tile
     std::size_t NumGroups,
     // Memory resource to be used for implementing the internal buffers
-    class MemResource = Resource::AUTO
+    Resource MemResource = Resource::AUTO
 >
     using Col2ColStreamTiler = StreamTiler<
         ColMajor, ColMajor, Type, /*Transpose=*/false,
@@ -250,7 +255,7 @@ template<
     // Number of input groups making up a tile
     std::size_t NumGroups,
     // Memory resource to be used for implementing the internal buffers
-    class MemResource = Resource::AUTO
+    Resource MemResource = Resource::AUTO
 >
     using Row2ColStreamTiler = StreamTiler<
         // Changing the order requires transposing each tile, i.e. change the
@@ -272,7 +277,7 @@ template<
     // Number of input groups making up a tile
     std::size_t NumGroups,
     // Memory resource to be used for implementing the internal buffers
-    class MemResource = Resource::AUTO
+    Resource MemResource = Resource::AUTO
 >
     using Row2RowStreamTiler = StreamTiler<
         RowMajor, RowMajor, Type, /*Transpose=*/false,
@@ -292,7 +297,7 @@ template<
     // Number of input groups making up a tile
     std::size_t NumGroups,
     // Memory resource to be used for implementing the internal buffers
-    class MemResource = Resource::AUTO
+    Resource MemResource = Resource::AUTO
 >
     using Col2RowStreamTiler = StreamTiler<
         // Changing the order requires transposing each tile, i.e. change the
@@ -312,7 +317,7 @@ template<
     // Number of tile cols on the right hand side
     std::size_t TileCols,
     // Memory resource to be used for implementing the internal buffers
-    class MemResource = Resource::AUTO
+    Resource MemResource = Resource::AUTO
 >
     using Row2ColAdapter = Row2ColStreamTiler<
         Type, TileRows, TileCols, 1, 1, MemResource
@@ -329,7 +334,7 @@ template<
     // Number of tile cols on the right hand side
     std::size_t TileCols,
     // Memory resource to be used for implementing the internal buffers
-    class MemResource = Resource::AUTO
+    Resource MemResource = Resource::AUTO
 >
     using Col2RowAdapter = Col2RowStreamTiler<
         Type, TileRows, TileCols, 1, 1, MemResource
