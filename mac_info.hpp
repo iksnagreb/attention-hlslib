@@ -1,6 +1,9 @@
 #ifndef MAC_INFO_HPP
 #define MAC_INFO_HPP
 
+// FINN HLS-Lib utility functions: Bit width of types, width_v
+#include "utils.hpp"
+
 // Recursive template wrapper to get the accumulator width and datatype of a
 // MAC unit to fit the biggest possible result of accumulating Num Lhs x Rhs
 // multiplications
@@ -15,7 +18,7 @@ template<class Lhs, class Rhs>
         using AccType = decltype(Lhs{} * Rhs{});
 
         // Width of the accumulator type
-        static constexpr unsigned acc_width = AccType::width;
+        static constexpr unsigned acc_width = width_v<AccType>;
     };
 
 // Recursive template wrapper to get the accumulator width and datatype of a
@@ -35,7 +38,7 @@ template<unsigned Num, class Lhs, class Rhs>
         );
 
         // Width of the accumulator type
-        static constexpr unsigned acc_width = AccType::width;
+        static constexpr unsigned acc_width = width_v<AccType>;
     };
 
 #endif // MAC_INFO_HPP
