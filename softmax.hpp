@@ -10,15 +10,15 @@
 // #include <hls_math.h>
 // C/C++ math library
 #include <cmath>
-// FINN HLS-Lib utility functions
+// Numeric limits of standard types
+#include <limits>
+// FINN HLS-Lib utility functions, e.g. clog2 and the numeric limits of
+// arbitrary precision datatypes
 #include <utils.hpp>
 // FINN HLSLIB tensors: Typed, little-endian containers backed by ap_uint
 #include <tensor.hpp>
 // FINN HLSLIB activation functions: e.g. pass-through and thresholds
 #include <activations.hpp>
-
-// Numeric limits of arbitrary precision datatypes
-#include "limits.hpp"
 
 
 // Wrap config containers in a namespace to not clutter the global namespace
@@ -108,9 +108,13 @@ template<
         // Type used to convert exponentiated elements to integers for
         // accumulation
         //  Note: 24 bits is a kind of arbitrary choice...
-        using ZType = ap_uint<24>;
-        // Scale factor to convert from float to the intermediate format
-        static constexpr float scale = max<ZType>;
+        static constexpr unsigned ZBits = 24;
+        using ZType = ap_uint<ZBits>;
+        // Scale factor to convert from float to the intermediate format, i.e.,
+        // the maximum value of the ZType
+        //  Note: Derived from the bit width instead of the ZType to not depend
+        //  on constexpr arbitrary precision types (HLS_CONSTEXPR_ENABLE)
+        static constexpr float scale = float((1ull << ZBits) - 1);
 
         // Receives repeated streams of not-normalized values and produces a
         // softmax normalized output stream
@@ -147,7 +151,7 @@ template<
                 // Scope of the zero loop to have simple short names for locals
                 {
                     // Track the current maximum value
-                    IType max_value = min<IType>;
+                    IType max_value = lowest();
 
                     // Operate as long as there are elements in the input stream
                     [[maybe_unused]] sm_loop0:
@@ -189,7 +193,7 @@ template<
                             // Send into buffer
                             max_buffer.write(max_value);
                             // Reset the maximum value
-                            max_value = min<IType>;
+                            max_value = lowest();
                         }
                     }
                 }
@@ -240,7 +244,7 @@ template<
 #pragma HLS ARRAY_PARTITION variable=value.ex complete dim=0
 
                     // Current maximum value per row
-                    IType max_value = min<IType>;
+                    IType max_value = lowest();
 
                     // Operate as long as there are elements in the input stream
                     [[maybe_unused]] sm_loop1:
@@ -369,6 +373,16 @@ template<
             }
 
     private:
+        // Lowest value of the input type, the start value of the search for
+        // the maximum per row
+        //  Note: Must be inlined including the std::numeric_limits, as HLS
+        //  rejects calls of functions from the standard library ("Unsupported
+        //  std function") which are not inlined.
+        static IType lowest() {
+#pragma HLS INLINE recursive
+            return std::numeric_limits<IType>::lowest();
+        }
+
         // Rounds a scaled exponential to the integer accumulation format
         //  Note: Must be inlined including the std::round, as HLS cannot
         //  implement a loop with sub-function calls as a flushable pipeline and
