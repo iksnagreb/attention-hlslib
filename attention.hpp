@@ -6,6 +6,8 @@
 // HLS arbitrary precision types: ap_uint class template
 #include <ap_int.h>
 
+// FINN HLSLIB tensors: Typed, little-endian containers backed by ap_uint
+#include "tensor.hpp"
 // Auxiliary structures for adding bind_storage pragmas to variables via C++
 // template parameters
 #include "bind_storage.hpp"
@@ -190,12 +192,15 @@ template<
         //  The mask (might be an input) and the attention weights (produced
         //  internally) are processed in S_ELEMS groups along one of the
         //  sequence dimensions (i.e. th KVLen dimension).
-        using QStream = hls::stream<ap_uint<QType::width * I_ELEMS>>;
-        using KStream = hls::stream<ap_uint<KType::width * I_ELEMS>>;
-        using VStream = hls::stream<ap_uint<VType::width * O_ELEMS>>;
-        using MStream = hls::stream<ap_uint<MType::width * S_ELEMS>>;
-        using AStream = hls::stream<ap_uint<AType::width * S_ELEMS>>;
-        using OStream = hls::stream<ap_uint<OType::width * O_ELEMS>>;
+        //
+        //  All streams carry tensors of parallel elements, with the first
+        //  element at the least significant bits.
+        using QStream = hls::stream<tensor<QType, I_ELEMS>>;
+        using KStream = hls::stream<tensor<KType, I_ELEMS>>;
+        using VStream = hls::stream<tensor<VType, O_ELEMS>>;
+        using MStream = hls::stream<tensor<MType, S_ELEMS>>;
+        using AStream = hls::stream<tensor<AType, S_ELEMS>>;
+        using OStream = hls::stream<tensor<OType, O_ELEMS>>;
 
         // Instance objects of the Query-Key and Attention-Value matmul as
         // configured above: These might have activation functions requiring

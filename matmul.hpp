@@ -6,16 +6,14 @@
 // HLS arbitrary precision types: ap_uint class template
 #include <ap_int.h>
 
-// Slicing of bit vectors
-#include "interpret.hpp"
+// FINN HLSLIB tensors: Typed, little-endian containers backed by ap_uint
+#include "tensor.hpp"
 // FINN HLSLIB activation functions: e.g. pass-through and thresholds
 #include "activations.hpp"
 // Multiply accumulate unit
 #include "mac.hpp"
 // Use the MACInfo to derive accumulator datatype
 #include "mac_info.hpp"
-// Flattening of buffers to bit vectors
-#include "flatten.hpp"
 
 // Tests for activation being the PassThroughActivation at compile time
 //  Note: Defaults to false for generic activations
@@ -37,9 +35,12 @@ template<class Activation, class Acc, class Out>
 // input stream of TileRows x TileCols tiles of size TH x TW elements.
 //
 // Naming Convention:
-//  *Elem: A single element of some ap_uint<> type
+//  *Elem: A single element of some type supported by the FINN HLSLIB tensor
 //  *Chunk: TH x Elem (for inputs), TW x Elem (for outputs)
 //  *Tile: TW x Chunk = TW x TH x Elem (only relevant for Rhs input)
+//
+// Chunks and tiles are streamed as tensors, with the first element at the
+// least significant bits.
 //
 // The left hand side is expected in row-major order while the tiles of the
 // right hand side are expected in column-major order.
@@ -80,15 +81,15 @@ template<
 //        );
 
         // Inputs arte chunked for input parallelism along the common dimension
-        using LhsChunk = ap_uint<LhsElem::width * TH>;
-        using RhsChunk = ap_uint<RhsElem::width * TH>;
+        using LhsChunk = tensor<LhsElem, TH>;
+        using RhsChunk = tensor<RhsElem, TH>;
         // Outputs are chunked for output parallelism along the width of each
         // tile
-        using OutChunk = ap_uint<OutElem::width * TW>;
+        using OutChunk = tensor<OutElem, TW>;
 
         // Grouping of chunks along the width yields tiles on the right hand
         // side
-        using RhsTile = ap_uint<RhsChunk::width * TW>;
+        using RhsTile = tensor<RhsElem, TW, TH>;
 
         // Type aliases for all the streams involved
         using LhsStream = hls::stream<LhsChunk>;
@@ -119,11 +120,6 @@ template<
 // Completely partition the accumulator array along all dimensions to avoid
 // conflicts when accessing all in parallel
 #pragma HLS ARRAY_PARTITION variable=acc complete dim=0
-            // Activations of TW parallel chunks
-            OutElem act[TW];
-// Completely partition the activations array along all dimensions to avoid
-// conflicts when accessing all in parallel
-#pragma HLS ARRAY_PARTITION variable=act complete dim=0
 
             // Actual loop variables mapping to the tile row index (tr) and tile
             // column index (tc)
@@ -163,31 +159,29 @@ template<
                     }
                 }
 
-                // Read the next right hand side tile from the stream and slice
-                // into TW chunks
-                auto const rhs_chunks = Slice<RhsChunk>{}(rhs.read());
+                // Read the next right hand side tile from the stream, which
+                // groups TW chunks
+                const RhsTile rhs_tile = rhs.read();
 
                 // Each tile yields partial results of TW MAC operations, these
                 // are the processing elements
                 for(std::size_t pe = 0; pe < TW; ++pe) {
 // Unroll all MACs to operate in parallel, there is no dependence between MACs
 #pragma HLS UNROLL
-                    // Slice the lhs chunk into elements
-                    auto const lhs_sliced = Slice<LhsElem>{}(lhs_chunk);
-                    // Slice each of the rhs chunks into elements
-                    auto const rhs_sliced = Slice<RhsElem>{}(rhs_chunks(pe, 0));
+                    // Slice the rhs chunk of this processing element out of
+                    // the tile
+                    const RhsChunk rhs_chunk = rhs_tile[pe];
 
                     // Each of the processing elements receives TH parallel
                     // input elements
                     for(std::size_t simd = 0; simd < TH; ++simd) {
 // Process all input elements in parallel
 #pragma HLS UNROLL
+                        // Slice the lhs and rhs chunk into elements
+                        const LhsElem lhs_elem = lhs_chunk[simd];
+                        const RhsElem rhs_elem = rhs_chunk[simd];
                         // Compute partial MAC to the accumulator
-                        acc[pe] += mul(
-                            lhs_sliced(simd, 0),
-                            rhs_sliced(simd, 0),
-                            ResourceType{}
-                        );
+                        mac(acc[pe], lhs_elem, rhs_elem, ResourceType{});
                     }
                 }
 
@@ -200,6 +194,8 @@ template<
                     // Reset loop index for next round
                     tr = 0;
 
+                    // Activations of TW parallel chunks
+                    OutChunk act;
                     // Compute the activation function over all TW accumulation
                     // results
                     for(std::size_t pe = 0; pe < TW; ++pe) {
@@ -207,14 +203,16 @@ template<
 // this can be unrolled
 #pragma HLS UNROLL
                         // Elementwise activation function from accumulator to
-                        // activations buffer
+                        // activations chunk
                         //  Note: Currently this allows for implicit type cast
-                        act[pe] = activation.activate(tc, pe, acc[pe]);
+                        const OutElem act_elem =
+                            activation.activate(tc, pe, acc[pe]);
+                        act[pe] = act_elem;
                     }
 
-                    // Flatten the activations output along the tile width, i.e.
-                    // parallel output elements (PE), and send to output stream
-                    out.write(flatten(act));
+                    // Send the activations output along the tile width, i.e.
+                    // parallel output elements (PE), to the output stream
+                    out.write(act);
                     // Advance to the next parallel output chunk, i.e. tile
                     // column
                     ++tc;

@@ -1,49 +1,33 @@
 #ifndef SWIZZLE_HPP
 #define SWIZZLE_HPP
 
-// HLS Stream library: hls::stream<> class template
-#include <hls_stream.h>
-// HLS arbitrary precision types
-#include <ap_int.h>
+// FINN HLSLIB tensors: Typed, little-endian containers backed by ap_uint
+#include "tensor.hpp"
 
-// Slicing of bit vectors
-#include "interpret.hpp"
-
-// Swizzles a SIMD x PE x Elements bitvector from SIMD first to PE first layout
+// Swizzles a PE x SIMD tensor (SIMD dimension innermost) to SIMD x PE layout
+// (PE dimension innermost), i.e., transposes the two dimensions.
 //  Note: This un-swizzles as well: Flip SIMD and PE to invert the operation
-template<unsigned SIMD, unsigned PE, int Width>
-    ap_uint<Width> swizzle(const ap_uint<Width> &in) {
+template<unsigned SIMD, unsigned PE, class Elem>
+    tensor<Elem, SIMD, PE> swizzle(const tensor<Elem, PE, SIMD> &in) {
 // Inline this small piece of bit moving logic
 #pragma HLS INLINE
-        // The width must at least be divisible by both, SIMD and PE
-        //  Note: This will catch some rather obvious logic errors, but
-        //  unfortunately not subtle things like confusing SIMD and PE.
-        static_assert(
-            Width % (SIMD * PE) == 0, "SIMD and PE must divide Width"
-        );
-        // Derive the datatype of a single element
-        using Element = ap_uint<Width / SIMD / PE>;
-        // The output vector will have the same bit width as the input, the
+        // The output tensor will have the same bit width as the input, the
         // content will just be reordered
-        ap_uint<Width> out;
-        // Slice the input into all separate elements
-        auto const elements = Slice<Element>{}(in);
+        tensor<Elem, SIMD, PE> out;
         // Iterate over the SIMD and PE dimensions
         for (unsigned pe = 0; pe < PE; ++pe) {
 // This should be unrolled to simple slicing and wiring logic
 #pragma HLS UNROLL
+            // Slice the SIMD elements of this PE out of the input tensor
+            const tensor<Elem, SIMD> elements = in[pe];
             for (unsigned simd = 0; simd < SIMD; ++simd) {
 // This should be unrolled to simple slicing and wiring logic
 #pragma HLS UNROLL
-                // Compute the source index into the input vector
-                const unsigned src = pe * SIMD + simd;
-                // Compute the destination index into the output vector
-                const unsigned dst = (simd * PE + pe) * Element::width;
-                // Stitch element from source into the output bitvector
-                out(dst + Element::width - 1, dst) = elements(src, 0);
+                // Stitch element from source into the output tensor
+                out[simd][pe] = Elem(elements[simd]);
             }
         }
-        // Return the swizzled bitvector
+        // Return the swizzled tensor
         return out;
     }
 

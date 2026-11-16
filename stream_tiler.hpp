@@ -5,13 +5,15 @@
 #include <hls_stream.h>
 // HLS arbitrary precision types
 #include <ap_int.h>
+// Compile-time selection of the tile layout: std::conditional
+#include <type_traits>
 
-// Slicing of bit vectors
-#include "interpret.hpp"
+// FINN HLSLIB tensors: Typed, little-endian containers backed by ap_uint
+#include "tensor.hpp"
 // Auxiliary structures for adding bind_storage pragmas to variables via C++
 // template parameters
 #include "bind_storage.hpp"
-// Swizzle (transpose) of bit vectors
+// Swizzle (transpose) of tensors
 #include "swizzle.hpp"
 
 // Specifies the direction in which a streamed matrix is processed
@@ -127,11 +129,18 @@ template<
 >
 // @formatter:on
     struct StreamTiler {
-        // Bitvector type representing a tile
-        //  Each tile collects tile-width x tile-height elements
-        using Tile = ap_uint<Elem::width * GroupSize * NumGroups>;
-        // Bitvector type representing a tile-height parallel input chunk
-        using Chunk = ap_uint<Elem::width * GroupSize>;
+        // Tensor type representing a tile-height parallel input chunk
+        using Chunk = tensor<Elem, GroupSize>;
+        // Tensor type representing a tile as it is collected from the input
+        //  Each tile collects NumGroups chunks of GroupSize elements, i.e., the
+        //  GroupSize dimension is innermost
+        using ITile = tensor<Elem, NumGroups, GroupSize>;
+        // Tensor type representing a transposed tile, i.e., the NumGroups
+        // dimension is innermost
+        using TTile = tensor<Elem, GroupSize, NumGroups>;
+        // Tensor type representing a tile as it is sent to the output:
+        // Transposed if specified via template arguments
+        using Tile = typename std::conditional<Transpose, TTile, ITile>::type;
 
         // Output data stream of ordered matrix tiles
         //  Note: The storage is bound in the constructor, as HLS pragmas may
@@ -180,22 +189,33 @@ template<
     private:
         // If specified via template arguments, this transposes a tile. If not,
         // this will simply pass through the input.
-        static Tile maybe_transpose(const Tile &tile) {
+        static Tile maybe_transpose(const ITile &tile) {
 // Inline this small piece of bit handling logic
 #pragma HLS INLINE
-            // Transpose flag is set as template argument, this should be a
-            // constexpr and might be optimized away (does HLS work this way?)
-            if(Transpose) {
-                // Transpose the tile by swizzling the GroupSize and NumGroups
-                // dimension
-                return swizzle<GroupSize, NumGroups>(tile);
-            }
-            // Pass-Through
+            // Transpose flag is set as template argument, dispatch at compile
+            // time as the two variants differ in their return type
+            return maybe_transpose(
+                tile, std::integral_constant<bool, Transpose>{}
+            );
+        }
+
+        // Transposes the tile by swizzling the GroupSize and NumGroups
+        // dimension
+        static TTile maybe_transpose(const ITile &tile, std::true_type) {
+// Inline this small piece of bit handling logic
+#pragma HLS INLINE
+            return swizzle<GroupSize, NumGroups>(tile);
+        }
+
+        // Pass-Through
+        static ITile maybe_transpose(const ITile &tile, std::false_type) {
+// Inline this small piece of bit handling logic
+#pragma HLS INLINE
             return tile;
         }
 
         // Datatype of the internal buffer holding the complete matrix of tiles
-        using Buffer = Tile[TileRows][TileCols];
+        using Buffer = ITile[TileRows][TileCols];
 
         // Shared implementation of stream to buffer reading
         void read2buffer(hls::stream<Chunk> &in, Buffer &buffer) {
@@ -212,10 +232,10 @@ template<
                 // Current chunk index within a tile
                 std::size_t n = i_index.n;
                 // Reference to the tile to be filled next
-                Tile &tile = buffer[i_index.tr][i_index.tc];
+                ITile &tile = buffer[i_index.tr][i_index.tc];
                 // Read the next chunk of data from the input stream into the
                 // tiled buffer
-                tile((n + 1) * Chunk::width - 1, n * Chunk::width) = in.read();
+                tile[n] = in.read();
                 // Next tile index
                 i_index.next();
             }
